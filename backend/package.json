@@ -1,0 +1,23 @@
+{
+  "name": "diet-planner-backend",
+  "version": "0.1.0",
+  "description": "Secure backend proxy that turns user body metrics into an AI-generated, location-aware diet plan via Claude.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.0.0",
+    "express": "^5.1.0",
+    "google-auth-library": "^10.7.0",
+    "jsonwebtoken": "^9.0.3"
+  }
+}

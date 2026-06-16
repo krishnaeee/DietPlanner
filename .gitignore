@@ -1,0 +1,21 @@
+# Secrets — never commit
+.env
+**/.env
+
+# Node
+node_modules/
+**/node_modules/
+
+# Backend runtime data (SQLite db, logs)
+backend/data/
+*.db
+*.log
+
+# Flutter / Dart build artifacts
+mobile/build/
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+
+# OS / editor
+.DS_Store
