@@ -1,6 +1,6 @@
 # AI Diet Planner — CLAUDE.md
 
-An AI-powered diet planner pairing a **Flutter** mobile app with a **Node/Express** backend that proxies authenticated plan generation to **Claude** (`claude-opus-4-8`). Users sign up with email+password or Google, fill a body/goal form, and Claude returns a structured multi-day meal plan that the app renders, saves per account, and turns into local reminders (a grocery alert at 7 PM the day before + meal-time alarms). The backend keeps the Anthropic key off the device and stores accounts in SQLite; **plans live only on the device** (per-account `SharedPreferences`) and are not yet server-synced.
+An AI-powered diet planner pairing a **Flutter** mobile app with a **Node/Express** backend that proxies authenticated plan generation to a pluggable **LLM provider** — **Anthropic Claude** (`claude-opus-4-8`, default) or **Google Gemini** (`gemini-2.5-flash`), switched with one env var. Users sign up with email+password or Google, fill a body/goal form, and the model returns a structured multi-day meal plan that the app renders, saves per account, and turns into local reminders (a grocery alert at 7 PM the day before + meal-time alarms). The backend keeps the LLM API key off the device and stores accounts in SQLite; **plans live only on the device** (per-account `SharedPreferences`) and are not yet server-synced.
 
 ## Architecture
 
@@ -28,12 +28,12 @@ An AI-powered diet planner pairing a **Flutter** mobile app with a **Node/Expres
 │   /health                            │        │
 │        │                             │        │
 │        ▼                             ▼        │
-│  ┌───────────────┐         ┌──────────────┐  │
-│  │ SQLite (users)│         │  Claude API   │  │
-│  │ node:sqlite   │         │ claude-opus-4-8│ │
-│  │ id·email·hash·│         │ streamed JSON │  │
-│  │ google_sub    │         │ ≤ MAX_PLAN_DAYS│ │
-│  └───────────────┘         └──────────────┘  │
+│  ┌───────────────┐    ┌──────────────────┐   │
+│  │ SQLite (users)│    │ LLM provider     │   │
+│  │ node:sqlite   │    │ providers.js     │   │
+│  │ id·email·hash·│    │  anthropic|gemini│   │
+│  │ google_sub    │    │ JSON ≤ MAX_PLAN_DAYS│ │
+│  └───────────────┘    └──────────────────┘   │
 └─────────────────────────────────────────────┘
 ```
 
@@ -47,7 +47,8 @@ diet-planner-app/
 │   ├── server.js          Express app: route mounting, CORS, JSON limit, /health, /api/plan + input validation, request timing logs
 │   ├── auth.js            authRouter (signup/login/google/me) + requireAuth middleware; bcrypt, JWT, Google ID-token verify
 │   ├── db.js              SQLite user store via node:sqlite (DatabaseSync); createUser/findUserByEmail/findUserById/linkGoogle + migration
-│   ├── planService.js     generatePlan(): Anthropic SDK streaming call, day cap, heartbeat logging, JSON parsing, error mapping
+│   ├── planService.js     generatePlan(): provider-agnostic orchestration — day cap, heartbeat logging, JSON parsing
+│   ├── providers.js       Provider layer: getProvider()/describeProvider(); anthropic + gemini generate() impls, schema dialect conversion
 │   ├── planSchema.js      PLAN_SCHEMA (strict JSON Schema) + buildPrompt() (system + user prompt)
 │   ├── package.json       ES-module config, scripts (dev/start), deps
 │   └── .env.example       Documents all env vars
@@ -84,7 +85,7 @@ diet-planner-app/
 4. **Home (InputScreen).** `initState → _initForUser()` runs `PlanStorage.loadAll()` then `NotificationService.instance.rescheduleAll(list)`, re-syncing reminders to the current account's plans (which clears the previous user's first). The screen shows the body/goal form and a `_SavedPlansSection` listing this account's `StoredPlan`s (open/rename/delete).
 5. **Fill form + Generate.** The user enters weight/height/target weight, location, target period (weeks/days), optional age/sex/activity/diet preference, and a plan name ("Who is this for?"). A live goal banner shows lose/gain/maintain. `_submit()` validates, converts the period to `targetDays`, builds the request body, and pushes `PlanScreen(requestBody, location, planName)`.
 6. **POST /api/plan.** `ApiService.generatePlan(body)` POSTs to `${apiBaseUrl}/api/plan` with `Content-Type: application/json` and `Authorization: Bearer <token>`, with a **240s** timeout. A `401` triggers `logout()` + "session expired".
-7. **Backend validates + calls Claude.** `requireAuth` verifies the JWT; `validate()` range-checks the body; `generatePlan()` calls Claude via the Anthropic SDK using `messages.stream({...})` + `finalMessage()`, with `thinking: { type: 'adaptive' }` and `output_config.format` = the strict `PLAN_SCHEMA` (JSON). Days are capped at `MAX_PLAN_DAYS` (`plannedDays = min(targetDays, cap)`); the response is `{ plan, meta }` where `meta.truncated` is true if the goal exceeded the cap.
+7. **Backend validates + calls the LLM.** `requireAuth` verifies the JWT; `validate()` range-checks the body; `generatePlan()` resolves the active provider via `getProvider()` and calls its `generate()`. Anthropic streams `messages.stream({...})` + `finalMessage()` with `thinking: { type: 'adaptive' }` and `output_config.format` = the strict `PLAN_SCHEMA`; Gemini calls `models.generateContent({...})` with `responseMimeType: 'application/json'` + a converted schema. Either way the model returns one JSON object. Days are capped at `MAX_PLAN_DAYS` (`plannedDays = min(targetDays, cap)`); the response is `{ plan, meta }` where `meta.truncated` is true if the goal exceeded the cap and `meta.provider`/`meta.model` record what produced it.
 8. **Plan rendered + auto-saved.** `PlanScreen` shows a `_CookingLoader` during generation, then `_PlanView` (summary, day selector, per-meal cards, truncation banner). On success it builds a `StoredPlan` (`id` = `microsecondsSinceEpoch`, `slot = PlanStorage.nextSlot(all)`, `startDate` = tomorrow, `remindersScheduled: false`) and `PlanStorage.upsert(sp)` — auto-saved under the account.
 9. **Set daily reminders.** Tapping "Set daily reminders" opens a Today/Tomorrow picker, calls `requestPermissions()`, then upserts `remindersScheduled: true` and runs `_rescheduleAndRefresh()`. `NotificationService` schedules, per plan slot: a **grocery alert at 7 PM the day before** each day (deduped ingredient shopping list) plus **meal-time alarms** at each meal's parsed `HH:mm`. IDs are namespaced per plan slot so people never collide.
 10. **Reminders persist; logout/login reconcile.** Scheduled counts are written back to each `StoredPlan`, and reminders survive reboot (boot receiver re-arms them). **Logout** (`_AccountMenu`) calls `NotificationService.instance.cancelAll()` before `AuthService.instance.logout()`; **login** re-syncs via the home's `_initForUser → rescheduleAll`.
@@ -113,10 +114,10 @@ Global middleware: `express.json({ limit: '1mb' })` and `cors()` (wide open). Au
           days: [ { day, totalCalories,
                     meals: [ { name, time, dish, description, calories,
                                ingredients: [ { name, quantity } ] } ] } ] },
-  meta: { requestedDays, plannedDays, truncated, model }
+  meta: { requestedDays, plannedDays, truncated, provider, model }
 }
 ```
-`truncated` is true when `targetDays > plannedDays` (goal exceeded `MAX_PLAN_DAYS`). Errors: `400` validation, `401` no/invalid token, `422` model refusal, `500/502` generation errors.
+`truncated` is true when `targetDays > plannedDays` (goal exceeded `MAX_PLAN_DAYS`); `provider`/`model` name what generated the plan. Errors: `400` validation, `401` no/invalid token, `422` model refusal/safety block, `500` missing key or unknown provider, `502` empty/unparseable output.
 
 ### Auth internals (`auth.js` + `db.js`)
 
@@ -127,24 +128,35 @@ Global middleware: `express.json({ limit: '1mb' })` and `cors()` (wide open). Au
 - **Google (`google-auth-library`):** `new OAuth2Client().verifyIdToken({ idToken, audience: GOOGLE_WEB_CLIENT_ID })`; extracts `email`/`sub`, finds-or-creates by email, `linkGoogle(user.id, sub)`, issues the app's own JWT. `GOOGLE_WEB_CLIENT_ID` is the **Web** OAuth client ID (the audience the Android ID token is minted for); unset → `500`.
 - **SQLite (`db.js`):** Node built-in `node:sqlite` (`DatabaseSync`) — no native build. DB at `DB_PATH` (default `./data/app.db`, dir auto-created). `users(id, email UNIQUE, password_hash, created_at)`; runtime migration adds `google_sub TEXT` via `PRAGMA table_info` if missing. Helpers: `createUser`, `findUserByEmail` (includes hash), `findUserById` (no hash), `linkGoogle`.
 
+### Provider layer (`providers.js`)
+
+- **Vendor switch:** `PROVIDER` (default `anthropic`; also `gemini`) selects the vendor; `MODEL` (optional) overrides that vendor's default model. Defaults: anthropic → `claude-opus-4-8`, gemini → `gemini-2.5-flash`.
+- **`getProvider()`** returns `{ name, model, generate }`. It throws a clear `500` if `PROVIDER` is unknown or the vendor's key env (`ANTHROPIC_API_KEY` / `GEMINI_API_KEY`) is unset. `describeProvider()` is a non-throwing variant used for the startup banner (works with no key).
+- **Uniform contract:** each provider's `generate({ system, user, maxTokens, effort })` returns `{ text, outTokens }`. `planService.js` stays vendor-agnostic — it builds the prompt, calls `generate()`, then parses the returned text.
+- **Anthropic impl:** streams `messages.stream({...})` + `finalMessage()`; `thinking: { type: 'adaptive' }`; `output_config: { effort, format: { type: 'json_schema', schema: PLAN_SCHEMA } }`. Maps `stop_reason === 'refusal'` → `422`, missing text block → `502`.
+- **Gemini impl** (`@google/genai`): `models.generateContent({...})` with `systemInstruction`, `maxOutputTokens`, `responseMimeType: 'application/json'`, and `responseSchema`. `EFFORT` is ignored (2.5-flash has built-in thinking). `finishReason === 'SAFETY'` → `422`, empty text → `502`.
+- **Schema dialect:** `toGeminiSchema()` adapts the shared `PLAN_SCHEMA` for Gemini — strips `additionalProperties` and uppercases `type` (OBJECT/ARRAY/STRING/INTEGER) — so both vendors return the same JSON shape (converted once, memoised).
+- **Lazy clients:** both `new Anthropic()` and `new GoogleGenAI({...})` are built on first use, so the server boots and `/health` responds without any key (generation then errors clearly with `500`).
+
 ### Plan-gen config (`planService.js` + `planSchema.js`)
 
-- **Model & params:** `MODEL` (default `claude-opus-4-8`), `EFFORT` (default `medium`; low|medium|high|max), `MAX_TOKENS` (default `32000`).
-- **Lazy client:** `getClient()` builds `new Anthropic()` on first use, so the server boots and `/health` responds without the API key (generation then errors clearly with `500`).
+- **Params:** `EFFORT` (default `medium`; low|medium|high|max — Anthropic only), `MAX_TOKENS` (default `32000`). Model/vendor live in the provider layer above.
 - **Day cap:** `MAX_PLAN_DAYS` (default `7`, exported); `plannedDays = min(targetDays, cap)`. Lowered to 7 because a full 14-day Opus plan can exceed the client timeout.
-- **Generation:** `getClient().messages.stream({...})` + `stream.finalMessage()`; `thinking: { type: 'adaptive' }`; `output_config: { effort: EFFORT, format: { type: 'json_schema', schema: PLAN_SCHEMA } }`. `PLAN_SCHEMA` is strict (`additionalProperties: false`, all `required`), shaped for direct mobile persistence.
-- **Observability:** `setInterval` heartbeat every 10s (`…still generating (Ns)`); logs response time, `stop_reason`, `usage.output_tokens`; `server.js` adds `[plan] ←`/`[plan] →` request timing.
-- **Errors:** `stop_reason === 'refusal'` → `422`; no text block → `502`; JSON parse failure logs the first 300 chars and rethrows. `parsePlanJson` tries clean `JSON.parse`, else strips ```` ```json ````/```` ``` ```` fences and grabs the outermost `{...}`.
-- **Prompt (`buildPrompt`):** system prompt = registered dietitian enforcing safe weight-change rates (~0.25–1 kg/week) and minimum-intake floors (~1200 kcal/day women, ~1500 men), local/seasonal ingredients, structured output only. User prompt injects body/goal/location + optional fields + computed `direction` (lose/gain/maintain) and requires exactly `plannedDays` days, 4 meals/day (Breakfast/Lunch/Dinner/Snack), local varied dishes, per-meal ingredients with quantities.
+- **Generation:** `generatePlan()` resolves `getProvider()`, calls `provider.generate(...)`, then `parsePlanJson(result.text)`. Returns `{ plan, meta }` with `meta.provider`/`meta.model`.
+- **Observability:** `setInterval` heartbeat every 10s (`…still generating (Ns)`); logs `provider:model`, response time, and out-tokens; `server.js` adds `[plan] ←`/`[plan] →` request timing.
+- **Errors:** provider-specific refusal/empty-output mapping lives in `providers.js` (see above); JSON parse failure logs the first 300 chars and rethrows. `parsePlanJson` tries clean `JSON.parse`, else strips ```` ```json ````/```` ``` ```` fences and grabs the outermost `{...}`.
+- **Prompt (`buildPrompt`):** system prompt = registered dietitian enforcing safe weight-change rates (~0.25–1 kg/week) and minimum-intake floors (~1200 kcal/day women, ~1500 men), local/seasonal ingredients, structured output only. User prompt injects body/goal/location + optional fields + computed `direction` (lose/gain/maintain) and requires exactly `plannedDays` days, 4 meals/day (Breakfast/Lunch/Dinner/Snack), local varied dishes, per-meal ingredients with quantities. Both vendors share this prompt + `PLAN_SCHEMA`.
 
 ### Env vars
 
 | Var | Used in | Default / purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | `planService.js` (SDK) | Required for generation; startup logs `apiKey=set|MISSING` |
+| `PROVIDER` | `providers.js` | `anthropic` (or `gemini`) — selects the LLM vendor |
+| `ANTHROPIC_API_KEY` | `providers.js` (SDK) | Required when `PROVIDER=anthropic`; startup banner shows `…=set\|MISSING` |
+| `GEMINI_API_KEY` | `providers.js` (SDK) | Required when `PROVIDER=gemini` |
+| `MODEL` | `providers.js` | Overrides the active vendor's default (`claude-opus-4-8` / `gemini-2.5-flash`) |
 | `PORT` | `server.js` | `3000` |
-| `MODEL` | `planService.js` | `claude-opus-4-8` |
-| `EFFORT` | `planService.js` | `medium` |
+| `EFFORT` | `planService.js` | `medium` (Anthropic only; Gemini ignores it) |
 | `MAX_TOKENS` | `planService.js` | `32000` |
 | `MAX_PLAN_DAYS` | `planService.js` | `7` (`.env.example` shows `14`, but code default is `7`) |
 | `JWT_SECRET` | `auth.js` | Falls back to insecure dev secret + warning |
@@ -155,7 +167,7 @@ Global middleware: `express.json({ limit: '1mb' })` and `cors()` (wide open). Au
 
 - **Dev:** `npm run dev` → `node --watch server.js` (auto-restart on source change).
 - **Prod:** `npm start` → `node server.js`.
-- Listens on `http://localhost:${PORT}` (default `3000`); boot log: `model=… · effort=… · maxPlanDays=… · apiKey=set|MISSING`. Requires Node `>=18` with `node:sqlite`; prints an experimental-feature warning at startup. SQLite file created at `data/app.db`.
+- Listens on `http://localhost:${PORT}` (default `3000`); boot log: `provider=… · model=… · effort=… · maxPlanDays=… · <KEY_ENV>=set|MISSING`. Requires Node `>=18` with `node:sqlite`; prints an experimental-feature warning at startup. SQLite file created at `data/app.db`.
 
 ## Frontend reference
 
@@ -260,6 +272,8 @@ Two OAuth clients in **one** Google Cloud project:
 - **Wireless adb drops** — wireless `adb` connections tend to disconnect; use USB + `adb reverse tcp:3000 tcp:3000` for stable physical-device runs.
 - **Debug-only cleartext HTTP** — plain-HTTP to the dev backend is allowed only in debug builds; release builds stay HTTPS-only.
 - **Native changes need a full rebuild** — manifest permissions/receivers and Gradle desugaring are not picked up by hot reload; re-run `flutter run` after pulling.
-- **Lazy Anthropic client** — the server boots and `/health` responds without `ANTHROPIC_API_KEY`; only `/api/plan` errors (`500`) when the key is missing.
+- **Switch LLM vendor with one env var** — `PROVIDER=anthropic|gemini` (+ `MODEL` to override the model). Only the selected vendor's key (`ANTHROPIC_API_KEY` / `GEMINI_API_KEY`) is needed. Because `node --watch` ignores `.env`, **restart the backend** after changing `PROVIDER`/`MODEL`/keys.
+- **Lazy LLM clients** — the server boots and `/health` responds without any provider key; only `/api/plan` errors (`500`) when the active provider's key is missing.
+- **Gemini shares Claude's schema/prompt** — `toGeminiSchema()` strips `additionalProperties` and uppercases `type` so the one strict `PLAN_SCHEMA` drives both vendors; the mobile `{ plan, meta }` shape is identical regardless of provider.
 - **Login does not leak account existence** — `bcrypt.compare` runs even for unknown emails to equalize timing.
 - **JWT default secret is insecure** — set `JWT_SECRET` in any real deployment; the fallback logs a warning.

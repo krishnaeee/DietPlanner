@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { generatePlan, MAX_PLAN_DAYS } from './planService.js';
+import { describeProvider } from './providers.js';
 import { authRouter, requireAuth } from './auth.js';
 
 const app = express();
@@ -89,8 +90,9 @@ app.post('/api/plan', requireAuth, async (req, res) => {
 });
 
 app.listen(PORT, () => {
+  const p = describeProvider();
   console.log(`Diet planner backend listening on http://localhost:${PORT}`);
   console.log(
-    `  model=${process.env.MODEL || 'claude-opus-4-8'} · effort=${process.env.EFFORT || 'medium'} · maxPlanDays=${MAX_PLAN_DAYS} · apiKey=${process.env.ANTHROPIC_API_KEY ? 'set' : 'MISSING'}`,
+    `  provider=${p.name} · model=${p.model} · effort=${process.env.EFFORT || 'medium'} · maxPlanDays=${MAX_PLAN_DAYS} · ${p.keyEnv}=${p.keySet ? 'set' : 'MISSING'}`,
   );
 });
