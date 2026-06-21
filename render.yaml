@@ -1,0 +1,35 @@
+# Render Blueprint — deploy with: dashboard.render.com → New + → Blueprint
+# (point it at this repo; Render reads this file from the repo root).
+#
+# FREE TIER: no persistent disk. The backend runs at $0, but note two limits:
+#   1. Cold starts — the service sleeps after ~15 min idle; the first request
+#      after that takes ~30-50s to wake.
+#   2. Ephemeral disk — the SQLite database (backend/data/app.db) is WIPED on
+#      every deploy and every restart, so user signups/logins do not persist.
+#      Fine for testing/demos. For durable accounts, add a Persistent Disk
+#      (paid) or migrate to Postgres later.
+
+services:
+  - type: web
+    name: diet-planner-backend
+    runtime: node
+    rootDir: backend            # server.js lives in backend/, not repo root
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    # Node 24 comes from backend/.node-version (needed for built-in node:sqlite).
+
+    envVars:
+      - key: PROVIDER
+        value: gemini
+      # Secrets: sync:false keeps them OUT of git — set the values in the
+      # Render dashboard (Environment tab) after the first deploy.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: GOOGLE_WEB_CLIENT_ID
+        sync: false
+      # PORT is injected by Render automatically — do not set it here.
+      # DB_PATH is left unset — defaults to ./data/app.db (ephemeral on free).
