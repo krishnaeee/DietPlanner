@@ -1,12 +1,15 @@
-import 'package:flutter/foundation.dart'
-    show kIsWeb, defaultTargetPlatform, TargetPlatform;
-
 /// Where the backend proxy lives.
 ///
-/// Override at run time (e.g. for a physical device on your LAN) with:
-///   flutter run --dart-define=API_BASE_URL=http://192.168.1.50:3000
+/// Defaults to the hosted backend on Render. For local development against a
+/// backend running on your machine, override at run time:
+///   flutter run --dart-define=API_BASE_URL=http://localhost:3000
+///   (Android emulator: use http://10.0.2.2:3000 instead)
 class AppConfig {
   static const String _override = String.fromEnvironment('API_BASE_URL');
+
+  /// The hosted backend (Render). Used unless overridden via --dart-define.
+  static const String _production =
+      'https://diet-planner-backend-qnux.onrender.com';
 
   /// The Google **Web** OAuth client ID, passed as `serverClientId` so the
   /// ID token is minted for an audience the backend can verify. Set with:
@@ -16,11 +19,6 @@ class AppConfig {
 
   static String get apiBaseUrl {
     if (_override.isNotEmpty) return _override;
-    // The Android emulator reaches the host machine via 10.0.2.2, not localhost.
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:3000';
-    }
-    // iOS simulator, web, desktop all reach the host as localhost.
-    return 'http://localhost:3000';
+    return _production;
   }
 }
