@@ -27,6 +27,9 @@ class Meal {
   final String dish;
   final String description;
   final int calories;
+  final int protein; // grams
+  final int carbs; // grams
+  final int fat; // grams
   final List<Ingredient> ingredients;
 
   Meal({
@@ -35,6 +38,9 @@ class Meal {
     required this.dish,
     required this.description,
     required this.calories,
+    this.protein = 0,
+    this.carbs = 0,
+    this.fat = 0,
     required this.ingredients,
   });
 
@@ -44,6 +50,9 @@ class Meal {
         dish: (j['dish'] ?? '').toString(),
         description: (j['description'] ?? '').toString(),
         calories: _toInt(j['calories']),
+        protein: _toInt(j['protein']),
+        carbs: _toInt(j['carbs']),
+        fat: _toInt(j['fat']),
         ingredients: ((j['ingredients'] as List?) ?? [])
             .map((e) => Ingredient.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -55,6 +64,9 @@ class Meal {
         'dish': dish,
         'description': description,
         'calories': calories,
+        'protein': protein,
+        'carbs': carbs,
+        'fat': fat,
         'ingredients': ingredients.map((e) => e.toJson()).toList(),
       };
 }
@@ -65,6 +77,10 @@ class DayPlan {
   final List<Meal> meals;
 
   DayPlan({required this.day, required this.totalCalories, required this.meals});
+
+  int get totalProtein => meals.fold(0, (s, m) => s + m.protein);
+  int get totalCarbs => meals.fold(0, (s, m) => s + m.carbs);
+  int get totalFat => meals.fold(0, (s, m) => s + m.fat);
 
   factory DayPlan.fromJson(Map<String, dynamic> j) => DayPlan(
         day: _toInt(j['day']),
@@ -84,6 +100,9 @@ class DayPlan {
 class DietPlan {
   final String summary;
   final int dailyCalorieTarget;
+  final int dailyProteinTarget; // grams
+  final int dailyCarbsTarget; // grams
+  final int dailyFatTarget; // grams
   final List<DayPlan> days;
 
   // From the response `meta` block.
@@ -95,6 +114,9 @@ class DietPlan {
   DietPlan({
     required this.summary,
     required this.dailyCalorieTarget,
+    this.dailyProteinTarget = 0,
+    this.dailyCarbsTarget = 0,
+    this.dailyFatTarget = 0,
     required this.days,
     required this.requestedDays,
     required this.plannedDays,
@@ -102,12 +124,19 @@ class DietPlan {
     required this.model,
   });
 
+  /// True when the plan carries macro targets (plans generated before macros
+  /// existed don't — the UI hides macro chrome for those).
+  bool get hasMacros => dailyProteinTarget > 0 || dailyCarbsTarget > 0 || dailyFatTarget > 0;
+
   factory DietPlan.fromResponse(Map<String, dynamic> body) {
     final plan = (body['plan'] ?? {}) as Map<String, dynamic>;
     final meta = (body['meta'] ?? {}) as Map<String, dynamic>;
     return DietPlan(
       summary: (plan['summary'] ?? '').toString(),
       dailyCalorieTarget: _toInt(plan['dailyCalorieTarget']),
+      dailyProteinTarget: _toInt(plan['dailyProteinTarget']),
+      dailyCarbsTarget: _toInt(plan['dailyCarbsTarget']),
+      dailyFatTarget: _toInt(plan['dailyFatTarget']),
       days: ((plan['days'] as List?) ?? [])
           .map((e) => DayPlan.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -141,10 +170,41 @@ class DietPlan {
     return DietPlan(
       summary: summary,
       dailyCalorieTarget: dailyCalorieTarget,
+      dailyProteinTarget: dailyProteinTarget,
+      dailyCarbsTarget: dailyCarbsTarget,
+      dailyFatTarget: dailyFatTarget,
       days: all,
       requestedDays: requestedDays,
       plannedDays: all.length,
       truncated: all.length < requestedDays,
+      model: model,
+    );
+  }
+
+  /// Returns a copy with one meal replaced (a "swap"), recomputing that day's
+  /// total calories from the new meal set.
+  DietPlan withReplacedMeal(int dayIndex, int mealIndex, Meal meal) {
+    if (dayIndex < 0 || dayIndex >= days.length) return this;
+    final day = days[dayIndex];
+    if (mealIndex < 0 || mealIndex >= day.meals.length) return this;
+    final meals = [...day.meals];
+    meals[mealIndex] = meal;
+    final newDays = [...days];
+    newDays[dayIndex] = DayPlan(
+      day: day.day,
+      totalCalories: meals.fold(0, (s, m) => s + m.calories),
+      meals: meals,
+    );
+    return DietPlan(
+      summary: summary,
+      dailyCalorieTarget: dailyCalorieTarget,
+      dailyProteinTarget: dailyProteinTarget,
+      dailyCarbsTarget: dailyCarbsTarget,
+      dailyFatTarget: dailyFatTarget,
+      days: newDays,
+      requestedDays: requestedDays,
+      plannedDays: plannedDays,
+      truncated: truncated,
       model: model,
     );
   }
@@ -155,6 +215,9 @@ class DietPlan {
         'plan': {
           'summary': summary,
           'dailyCalorieTarget': dailyCalorieTarget,
+          'dailyProteinTarget': dailyProteinTarget,
+          'dailyCarbsTarget': dailyCarbsTarget,
+          'dailyFatTarget': dailyFatTarget,
           'days': days.map((e) => e.toJson()).toList(),
         },
         'meta': {

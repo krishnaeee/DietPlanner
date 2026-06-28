@@ -1,4 +1,4 @@
-import { buildPrompt } from './planSchema.js';
+import { buildPrompt, buildMealPrompt, MEAL_SCHEMA } from './planSchema.js';
 import { getProvider } from './providers.js';
 
 // EFFORT only applies to providers that support reasoning effort (Anthropic);
@@ -82,4 +82,21 @@ export async function generatePlan(input) {
       model: provider.model,
     },
   };
+}
+
+// Regenerates a single meal (a "swap") — same slot/budget/locale, different
+// dish. A small, fast call compared to a full plan.
+export async function generateMeal(input) {
+  const { system, user } = buildMealPrompt(input);
+  const provider = getProvider();
+  console.log(`[meal] swapping ${input.mealName || 'meal'} in ${input.location}…`);
+  const result = await provider.generate({
+    system,
+    user,
+    maxTokens: 2000,
+    effort: 'low',
+    schema: MEAL_SCHEMA,
+  });
+  const meal = parsePlanJson(result.text);
+  return { meal, meta: { provider: provider.name, model: provider.model } };
 }

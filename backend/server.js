@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { generatePlan, MAX_PLAN_DAYS } from './planService.js';
+import { generatePlan, generateMeal, MAX_PLAN_DAYS } from './planService.js';
 import { describeProvider } from './providers.js';
 import { authRouter, requireAuth } from './auth.js';
 import { billingRouter, stripeWebhookHandler } from './billingRoutes.js';
@@ -143,6 +143,36 @@ app.post('/api/plan', requireAuth, async (req, res) => {
     if (err?.stack) console.error(err.stack);
     const status = err.status || 500;
     res.status(status).json({ error: err.message || 'Failed to generate plan.' });
+  }
+});
+
+// Swap a single meal. Free (auth only) — it refines a plan the user already
+// paid to generate, and is a much smaller call than a full plan.
+app.post('/api/plan/meal', requireAuth, async (req, res) => {
+  const body = req.body || {};
+  const num = (v) => (typeof v === 'number' && isFinite(v) ? v : Number(v));
+  const location = typeof body.location === 'string' ? body.location.trim() : '';
+  if (!location) return res.status(400).json({ error: 'location is required' });
+
+  const input = {
+    location,
+    mealName: typeof body.mealName === 'string' ? body.mealName.trim() : '',
+    time: typeof body.time === 'string' ? body.time.trim() : '',
+    avoidDish: typeof body.avoidDish === 'string' ? body.avoidDish.trim() : '',
+    dietaryPreference:
+      typeof body.dietaryPreference === 'string' ? body.dietaryPreference.trim() : '',
+  };
+  const tc = Math.round(num(body.targetCalories));
+  if (tc > 0 && tc < 5000) input.targetCalories = tc;
+
+  try {
+    const { meal } = await generateMeal(input);
+    console.log(`[meal] → swapped to "${meal?.dish ?? '?'}" for ${req.user?.email}`);
+    res.json({ meal });
+  } catch (err) {
+    const status = err.status || 500;
+    console.error(`[meal] → ${status}: ${err?.message}`);
+    res.status(status).json({ error: err.message || 'Failed to swap meal.' });
   }
 });
 

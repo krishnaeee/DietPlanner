@@ -38,7 +38,7 @@ const PROVIDERS = {
   anthropic: {
     keyEnv: 'ANTHROPIC_API_KEY',
     defaultModel: 'claude-opus-4-8',
-    async generate({ model, system, user, maxTokens, effort }) {
+    async generate({ model, system, user, maxTokens, effort, schema = PLAN_SCHEMA }) {
       if (!_anthropic) _anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY
       // Stream so large multi-day plans don't hit the SDK's non-streaming timeout.
       const stream = _anthropic.messages.stream({
@@ -47,7 +47,7 @@ const PROVIDERS = {
         thinking: { type: 'adaptive' },
         output_config: {
           effort,
-          format: { type: 'json_schema', schema: PLAN_SCHEMA },
+          format: { type: 'json_schema', schema },
         },
         system,
         messages: [{ role: 'user', content: user }],
@@ -73,11 +73,19 @@ const PROVIDERS = {
   gemini: {
     keyEnv: 'GEMINI_API_KEY',
     defaultModel: 'gemini-2.5-flash',
-    async generate({ model, system, user, maxTokens }) {
+    async generate({ model, system, user, maxTokens, schema = PLAN_SCHEMA }) {
       if (!_gemini) {
         _gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       }
-      if (!_geminiSchema) _geminiSchema = toGeminiSchema(PLAN_SCHEMA);
+      // Convert + cache the default plan schema; convert others on demand
+      // (meal-swap calls are infrequent).
+      let responseSchema;
+      if (schema === PLAN_SCHEMA) {
+        if (!_geminiSchema) _geminiSchema = toGeminiSchema(PLAN_SCHEMA);
+        responseSchema = _geminiSchema;
+      } else {
+        responseSchema = toGeminiSchema(schema);
+      }
 
       const res = await _gemini.models.generateContent({
         model,
@@ -85,10 +93,10 @@ const PROVIDERS = {
         config: {
           systemInstruction: system,
           maxOutputTokens: maxTokens,
-          // Force a single JSON object that matches the plan schema — no fences,
+          // Force a single JSON object that matches the schema — no fences,
           // no prose — so the same tolerant parser handles both providers.
           responseMimeType: 'application/json',
-          responseSchema: _geminiSchema,
+          responseSchema,
         },
       });
 

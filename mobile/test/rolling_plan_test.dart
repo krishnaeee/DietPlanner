@@ -64,4 +64,51 @@ void main() {
       expect(merged.truncated, isFalse);
     });
   });
+
+  group('DietPlan.withReplacedMeal', () {
+    Meal meal(int cals) => Meal(
+          name: 'Lunch',
+          time: '13:00',
+          dish: 'New dish',
+          description: '',
+          calories: cals,
+          protein: 30,
+          carbs: 40,
+          fat: 10,
+          ingredients: [],
+        );
+
+    DietPlan plan() => DietPlan(
+          summary: 's',
+          dailyCalorieTarget: 1800,
+          dailyProteinTarget: 120,
+          dailyCarbsTarget: 180,
+          dailyFatTarget: 50,
+          days: [
+            DayPlan(day: 1, totalCalories: 1000, meals: [_day(1).meals.first, meal(600)]),
+          ],
+          requestedDays: 7,
+          plannedDays: 1,
+          truncated: true,
+          model: 'test',
+        );
+
+    test('replaces the meal and recomputes the day total', () {
+      final p = plan();
+      final firstCals = p.days[0].meals[0].calories;
+      final merged = p.withReplacedMeal(0, 1, meal(750));
+      expect(merged.days[0].meals[1].dish, 'New dish');
+      expect(merged.days[0].totalCalories, firstCals + 750);
+      // Macro targets are preserved across a swap.
+      expect(merged.dailyProteinTarget, 120);
+    });
+
+    test('out-of-range indices are a no-op', () {
+      final p = plan();
+      expect(p.withReplacedMeal(5, 0, meal(700)).days[0].totalCalories,
+          p.days[0].totalCalories);
+      expect(p.withReplacedMeal(0, 9, meal(700)).days[0].totalCalories,
+          p.days[0].totalCalories);
+    });
+  });
 }

@@ -446,6 +446,7 @@ class _PlanViewState extends State<_PlanView> {
   late DietPlan _plan; // grows as the user loads more weeks
   bool _busy = false;
   bool _extending = false; // a "load next week" generation is in flight
+  int? _swapping; // meal index (on the selected day) currently being swapped
   PlanTracking _tracking = PlanTracking();
 
   final ScrollController _scroll = ScrollController();
@@ -505,6 +506,53 @@ class _PlanViewState extends State<_PlanView> {
     final next = _tracking.toggleMeal(dayIndex, mealIndex);
     setState(() => _tracking = next);
     await TrackingStorage.save(_sp.id, next);
+  }
+
+  /// Regenerates a single meal on the selected day (free on the backend), then
+  /// replaces it in place and persists.
+  Future<void> _swapMeal(int mealIndex) async {
+    if (_swapping != null) return;
+    final dayIndex = _selected;
+    final day = _plan.days[dayIndex];
+    if (mealIndex < 0 || mealIndex >= day.meals.length) return;
+    final meal = day.meals[mealIndex];
+    final messenger = ScaffoldMessenger.of(context);
+    final req = _sp.request;
+    final location =
+        widget.location.trim().isNotEmpty ? widget.location.trim() : '${req?['location'] ?? ''}';
+
+    final body = <String, dynamic>{
+      'location': location,
+      'mealName': meal.name,
+      'time': meal.time,
+      'targetCalories': meal.calories,
+      'avoidDish': meal.dish,
+      if (req?['dietaryPreference'] != null)
+        'dietaryPreference': req!['dietaryPreference'],
+    };
+
+    setState(() => _swapping = mealIndex);
+    try {
+      final fresh = await ApiService.swapMeal(body);
+      final merged = _plan.withReplacedMeal(dayIndex, mealIndex, fresh);
+      await PlanStorage.upsert(_sp.copyWith(plan: merged));
+      if (!mounted) return;
+      setState(() {
+        _plan = merged;
+        _sp = _sp.copyWith(plan: merged);
+        _swapping = null;
+      });
+      messenger.showSnackBar(SnackBar(
+          content: Text(fresh.dish.isEmpty ? 'Meal swapped.' : 'Swapped to ${fresh.dish}.')));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _swapping = null);
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _swapping = null);
+      messenger.showSnackBar(SnackBar(content: Text('Could not swap meal. $e')));
+    }
   }
 
   void _openProgress() {
@@ -613,8 +661,11 @@ class _PlanViewState extends State<_PlanView> {
                     isToday: _todayIndex == _selected,
                     highlightIndex: _highlight,
                     mealKey: _mealKey,
+                    plan: plan,
+                    swappingIndex: _swapping,
                     isDone: (m) => _tracking.isMealDone(_selected, m),
                     onToggle: (m) => _toggleMeal(_selected, m),
+                    onSwap: _swapMeal,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -1332,8 +1383,11 @@ class _DayDetail extends StatelessWidget {
   final bool isToday;
   final int? highlightIndex;
   final Key? mealKey;
+  final DietPlan plan;
+  final int? swappingIndex;
   final bool Function(int meal) isDone;
   final void Function(int meal) onToggle;
+  final void Function(int meal) onSwap;
   const _DayDetail({
     super.key,
     required this.day,
@@ -1341,8 +1395,11 @@ class _DayDetail extends StatelessWidget {
     required this.isToday,
     this.highlightIndex,
     this.mealKey,
+    required this.plan,
+    this.swappingIndex,
     required this.isDone,
     required this.onToggle,
+    required this.onSwap,
   });
 
   @override
@@ -1441,6 +1498,10 @@ class _DayDetail extends StatelessWidget {
             ),
           ],
         ),
+        if (plan.hasMacros) ...[
+          const SizedBox(height: 14),
+          _MacroBars(day: day, plan: plan),
+        ],
         const SizedBox(height: 14),
         ...List.generate(day.meals.length, (m) {
           final hi = m == highlightIndex;
@@ -1451,10 +1512,100 @@ class _DayDetail extends StatelessWidget {
               meal: day.meals[m],
               highlight: hi,
               done: isDone(m),
+              swapping: swappingIndex == m,
+              swapDisabled: swappingIndex != null,
               onToggle: () => onToggle(m),
+              onSwap: () => onSwap(m),
             ),
           );
         }),
+      ],
+    );
+  }
+}
+
+/// Three slim bars showing the day's protein / carbs / fat against the plan's
+/// daily targets.
+class _MacroBars extends StatelessWidget {
+  final DayPlan day;
+  final DietPlan plan;
+  const _MacroBars({required this.day, required this.plan});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _MacroBar(
+            label: 'Protein',
+            grams: day.totalProtein,
+            target: plan.dailyProteinTarget,
+            color: AppColors.brand,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MacroBar(
+            label: 'Carbs',
+            grams: day.totalCarbs,
+            target: plan.dailyCarbsTarget,
+            color: AppColors.accent,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MacroBar(
+            label: 'Fat',
+            grams: day.totalFat,
+            target: plan.dailyFatTarget,
+            color: AppColors.dinner,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MacroBar extends StatelessWidget {
+  final String label;
+  final int grams;
+  final int target;
+  final Color color;
+  const _MacroBar({
+    required this.label,
+    required this.grams,
+    required this.target,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final pct = target <= 0 ? 0.0 : (grams / target).clamp(0.0, 1.0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label,
+                style: text.labelSmall?.copyWith(
+                    color: AppColors.inkMuted, fontWeight: FontWeight.w700)),
+            Text(target > 0 ? '$grams/${target}g' : '${grams}g',
+                style: text.labelSmall?.copyWith(
+                    color: AppColors.ink, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 5),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: pct,
+            minHeight: 6,
+            backgroundColor: AppColors.line,
+            valueColor: AlwaysStoppedAnimation(color),
+          ),
+        ),
       ],
     );
   }
@@ -1464,12 +1615,18 @@ class _MealCard extends StatelessWidget {
   final Meal meal;
   final bool highlight;
   final bool done;
+  final bool swapping; // this meal is being regenerated
+  final bool swapDisabled; // another meal on the day is being swapped
   final VoidCallback? onToggle;
+  final VoidCallback? onSwap;
   const _MealCard({
     required this.meal,
     this.highlight = false,
     this.done = false,
+    this.swapping = false,
+    this.swapDisabled = false,
     this.onToggle,
+    this.onSwap,
   });
 
   @override
@@ -1539,8 +1696,12 @@ class _MealCard extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                if (onSwap != null) ...[
+                  const SizedBox(width: 6),
+                  _swapButton(context, color),
+                ],
                 if (onToggle != null) ...[
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 6),
                   _MealCheck(done: done, onTap: onToggle!),
                 ],
               ],
@@ -1555,6 +1716,18 @@ class _MealCard extends StatelessWidget {
               Text(
                 meal.description,
                 style: text.bodySmall?.copyWith(color: AppColors.inkMuted, height: 1.4),
+              ),
+            ],
+            if (meal.protein > 0 || meal.carbs > 0 || meal.fat > 0) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _macroChip(context, 'P', meal.protein, AppColors.brand),
+                  const SizedBox(width: 8),
+                  _macroChip(context, 'C', meal.carbs, AppColors.accent),
+                  const SizedBox(width: 8),
+                  _macroChip(context, 'F', meal.fat, AppColors.dinner),
+                ],
               ),
             ],
             if (meal.ingredients.isNotEmpty) ...[
@@ -1594,6 +1767,48 @@ class _MealCard extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _macroChip(BuildContext context, String letter, int grams, Color color) {
+    final text = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '$letter ${grams}g',
+        style: text.labelSmall?.copyWith(color: color, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+
+  Widget _swapButton(BuildContext context, Color color) {
+    final enabled = !swapping && !swapDisabled;
+    return Semantics(
+      button: true,
+      label: 'Swap this meal for a different dish',
+      child: Material(
+        color: AppColors.fieldFill,
+        shape: CircleBorder(side: BorderSide(color: AppColors.line, width: 1.5)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: enabled ? onSwap : null,
+          child: SizedBox(
+            width: 36,
+            height: 36,
+            child: swapping
+                ? const Padding(
+                    padding: EdgeInsets.all(9),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(Icons.autorenew_rounded,
+                    size: 20, color: enabled ? color : AppColors.inkFaint),
+          ),
         ),
       ),
     );

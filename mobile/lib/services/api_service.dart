@@ -93,4 +93,46 @@ class ApiService {
     }
     throw ApiException(message);
   }
+
+  /// Regenerates a single meal (a "swap"). Free on the backend (auth only), so
+  /// no paywall path here. Returns the replacement meal.
+  static Future<Meal> swapMeal(Map<String, dynamic> body) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/plan/meal');
+    final token = AuthService.instance.token;
+    http.Response resp;
+    try {
+      resp = await http
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 120));
+    } catch (e) {
+      throw ApiException('Could not reach the server. ($e)');
+    }
+
+    if (resp.statusCode == 200) {
+      final b = jsonDecode(resp.body) as Map<String, dynamic>;
+      final meal = b['meal'];
+      if (meal is Map<String, dynamic>) return Meal.fromJson(meal);
+      throw ApiException('The server returned no meal.');
+    }
+    if (resp.statusCode == 401) {
+      await AuthService.instance.logout();
+      throw ApiException('Your session expired. Please log in again.');
+    }
+    String message;
+    try {
+      final err = jsonDecode(resp.body);
+      final e = err is Map ? err['error'] : null;
+      message = e?.toString() ?? 'Could not swap the meal.';
+    } catch (_) {
+      message = 'Could not swap the meal (HTTP ${resp.statusCode}).';
+    }
+    throw ApiException(message);
+  }
 }
