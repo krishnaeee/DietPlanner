@@ -66,6 +66,21 @@ function validate(body) {
     value.dietaryPreference = body.dietaryPreference.trim();
   }
 
+  // Continuation: which day of the journey this batch starts at, and dishes
+  // from earlier weeks to avoid repeating.
+  if (body.startDay != null && body.startDay !== '') {
+    const startDay = Math.round(num(body.startDay));
+    if (!(startDay >= 1 && startDay <= targetDays))
+      errors.push('startDay must be between 1 and targetDays');
+    else value.startDay = startDay;
+  }
+  if (Array.isArray(body.avoidDishes)) {
+    value.avoidDishes = body.avoidDishes
+      .filter((d) => typeof d === 'string' && d.trim())
+      .map((d) => d.trim())
+      .slice(0, 40); // cap so the prompt stays bounded
+  }
+
   return errors.length ? { error: errors } : { value };
 }
 

@@ -118,6 +118,37 @@ class DietPlan {
     );
   }
 
+  /// Returns a copy with [more] days appended (a freshly generated next week),
+  /// recomputing how much of the requested journey is now covered.
+  ///
+  /// The appended days are **renumbered contiguously** from the current last day
+  /// and capped at [requestedDays]. The model often ignores the "number days N
+  /// to M" instruction and renumbers from 1; trusting its numbers would create
+  /// duplicate day numbers and stall the "next start" cursor (re-requesting the
+  /// same week forever). Renumbering here makes the merge robust regardless.
+  DietPlan withAppendedDays(List<DayPlan> more) {
+    final room = requestedDays - days.length;
+    final take = room > 0 ? more.take(room) : const <DayPlan>[];
+    var nextDay = days.isEmpty ? 1 : days.last.day + 1;
+    final renumbered = take
+        .map((d) => DayPlan(
+              day: nextDay++,
+              totalCalories: d.totalCalories,
+              meals: d.meals,
+            ))
+        .toList();
+    final all = [...days, ...renumbered];
+    return DietPlan(
+      summary: summary,
+      dailyCalorieTarget: dailyCalorieTarget,
+      days: all,
+      requestedDays: requestedDays,
+      plannedDays: all.length,
+      truncated: all.length < requestedDays,
+      model: model,
+    );
+  }
+
   /// Serializes back to the same `{plan, meta}` shape `fromResponse` parses,
   /// so it can be stored locally and re-loaded losslessly.
   Map<String, dynamic> toResponseJson() => {

@@ -32,6 +32,11 @@ class StoredPlan {
   final double? startWeightKg;
   final double? targetWeightKg;
 
+  /// The original `/api/plan` request body, kept so the plan can be extended
+  /// week-by-week (re-called with a later `startDay`). Null for plans saved
+  /// before this existed — those can't be extended.
+  final Map<String, dynamic>? request;
+
   StoredPlan({
     required this.id,
     required this.name,
@@ -45,10 +50,12 @@ class StoredPlan {
     this.repeatForever = false,
     this.startWeightKg,
     this.targetWeightKg,
+    this.request,
   });
 
   StoredPlan copyWith({
     String? name,
+    DietPlan? plan,
     DateTime? startDate,
     bool? remindersScheduled,
     bool? repeatForever,
@@ -58,7 +65,7 @@ class StoredPlan {
         id: id,
         name: name ?? this.name,
         slot: slot,
-        plan: plan,
+        plan: plan ?? this.plan,
         location: location,
         startDate: startDate ?? this.startDate,
         remindersScheduled: remindersScheduled ?? this.remindersScheduled,
@@ -67,6 +74,7 @@ class StoredPlan {
         savedAt: savedAt,
         startWeightKg: startWeightKg,
         targetWeightKg: targetWeightKg,
+        request: request,
       );
 
   Map<String, dynamic> toJson() => {
@@ -82,6 +90,7 @@ class StoredPlan {
         'savedAt': savedAt.toIso8601String(),
         if (startWeightKg != null) 'startWeightKg': startWeightKg,
         if (targetWeightKg != null) 'targetWeightKg': targetWeightKg,
+        if (request != null) 'request': request,
       };
 
   static double? _optDouble(dynamic v) =>
@@ -101,6 +110,9 @@ class StoredPlan {
         savedAt: DateTime.tryParse((m['savedAt'] ?? '').toString()) ?? DateTime.now(),
         startWeightKg: _optDouble(m['startWeightKg']),
         targetWeightKg: _optDouble(m['targetWeightKg']),
+        request: m['request'] is Map
+            ? Map<String, dynamic>.from(m['request'] as Map)
+            : null,
       );
 }
 

@@ -92,7 +92,12 @@ export function buildPrompt(input, plannedDays) {
     sex,
     activityLevel,
     dietaryPreference,
+    startDay = 1,
+    avoidDishes = [],
   } = input;
+
+  const endDay = startDay + plannedDays - 1;
+  const isContinuation = startDay > 1;
 
   const system =
     'You are a registered dietitian and meal planner. You design realistic, ' +
@@ -113,6 +118,14 @@ export function buildPrompt(input, plannedDays) {
 
   const direction = targetWeightKg < weightKg ? 'lose' : targetWeightKg > weightKg ? 'gain' : 'maintain';
 
+  const continuationContext = isContinuation
+    ? `\nThis is a CONTINUATION of an ongoing ${targetDays}-day plan. You are filling days ${startDay} to ${endDay}. Keep the same daily calorie target and style as the rest of the plan.`
+    : '';
+
+  const avoidLine = avoidDishes.length
+    ? `\n- Do NOT reuse any of these dishes already planned earlier — pick different meals: ${avoidDishes.join(', ')}.`
+    : '';
+
   const user = `Create a personalised diet plan with these details:
 
 Current weight: ${weightKg} kg
@@ -120,12 +133,12 @@ Height: ${heightCm} cm
 Target weight: ${targetWeightKg} kg (goal: ${direction} weight)
 Target time period: ${targetDays} days
 Location: ${location}
-${optional ? optional + '\n' : ''}
+${optional ? optional + '\n' : ''}${continuationContext}
 Requirements:
-- Plan exactly ${plannedDays} day(s), numbered 1 to ${plannedDays}.
+- Plan exactly ${plannedDays} day(s), numbered ${startDay} to ${endDay}.
 - Each day must include Breakfast, Lunch, Dinner, and one Snack (4 meals).
 - Use dishes and ingredients that are local, regional, and commonly available in ${location}.
-- Vary the dishes across days so the plan does not get repetitive.
+- Vary the dishes across days so the plan does not get repetitive.${avoidLine}
 - For every meal, list its ingredients with realistic shopping quantities.
 - Choose a daily calorie target that moves the user safely toward the target weight over the full ${targetDays}-day period. If the target is not safely achievable in that time, plan for the safe maximum instead and explain this in the summary.`;
 

@@ -93,6 +93,7 @@ class _PlanScreenState extends State<PlanScreen> {
       savedAt: DateTime.now(),
       startWeightKg: metric('weightKg'),
       targetWeightKg: metric('targetWeightKg'),
+      request: Map<String, dynamic>.from(body), // kept so the plan can be extended
     );
     await PlanStorage.upsert(sp); // new plans are added, not overwritten
     _current = sp;
@@ -442,7 +443,9 @@ class _PlanViewState extends State<_PlanView> {
   int _selected = 0;
 
   late StoredPlan _sp;
+  late DietPlan _plan; // grows as the user loads more weeks
   bool _busy = false;
+  bool _extending = false; // a "load next week" generation is in flight
   PlanTracking _tracking = PlanTracking();
 
   final ScrollController _scroll = ScrollController();
@@ -467,7 +470,7 @@ class _PlanViewState extends State<_PlanView> {
     final today = DateTime(now.year, now.month, now.day);
     final s = DateTime(_start.year, _start.month, _start.day);
     final diff = today.difference(s).inDays;
-    if (diff < 0 || diff >= widget.plan.days.length) return null;
+    if (diff < 0 || diff >= _plan.days.length) return null;
     return diff;
   }
 
@@ -475,7 +478,8 @@ class _PlanViewState extends State<_PlanView> {
   void initState() {
     super.initState();
     _sp = widget.stored;
-    final n = widget.plan.days.length;
+    _plan = widget.plan;
+    final n = _plan.days.length;
     if (n > 0) {
       if (widget.initialDay != null) {
         // Deep-linked from a tapped notification — honour that day.
@@ -532,7 +536,7 @@ class _PlanViewState extends State<_PlanView> {
 
   @override
   Widget build(BuildContext context) {
-    final plan = widget.plan;
+    final plan = _plan;
     final text = Theme.of(context).textTheme;
     final days = plan.days;
     final sub = widget.location.trim().isEmpty
@@ -575,8 +579,8 @@ class _PlanViewState extends State<_PlanView> {
               if (plan.truncated) ...[
                 const SizedBox(height: 12),
                 _InfoBanner(
-                  text: 'Showing the first ${plan.plannedDays} of '
-                      '${plan.requestedDays} days. Longer plans arrive in a later update.',
+                  text: '${plan.days.length} of ${plan.requestedDays} days ready. '
+                      'Load the next week at the bottom to extend your plan.',
                 ),
               ],
               if (days.isNotEmpty) ...[
@@ -613,6 +617,8 @@ class _PlanViewState extends State<_PlanView> {
                     onToggle: (m) => _toggleMeal(_selected, m),
                   ),
                 ),
+                const SizedBox(height: 20),
+                _extendSection(plan, text),
               ] else
                 Padding(
                   padding: const EdgeInsets.only(top: 40),
@@ -628,6 +634,186 @@ class _PlanViewState extends State<_PlanView> {
         if (days.isNotEmpty) _reminderBar(),
       ],
     );
+  }
+
+  // ──────────────────────────────────────────────── extend (load next week) ──
+
+  /// Footer below the day list: a button to generate the next batch of days, or
+  /// a "plan complete" note once the whole journey is built. Hidden for plans
+  /// with no stored request (can't be extended) and for short plans that were
+  /// never truncated.
+  Widget _extendSection(DietPlan plan, TextTheme text) {
+    final remaining = plan.requestedDays - plan.days.length;
+
+    if (remaining <= 0) {
+      // Nothing left to load. Show a done note only for multi-week journeys
+      // (a short single-shot plan never needed extending).
+      if (plan.requestedDays <= 7) return const SizedBox.shrink();
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.brand.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(AppRadius.card),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: AppColors.brand, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Your full ${plan.requestedDays}-day plan is ready.',
+                style: text.bodyMedium
+                    ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_sp.request == null) return const SizedBox.shrink(); // can't extend
+
+    final next = math.min(7, remaining);
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.line),
+        boxShadow: softShadow(opacity: 0.05, blur: 14, y: 6),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.event_repeat_rounded,
+                    color: AppColors.accent, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${plan.days.length} of ${plan.requestedDays} days ready',
+                        style:
+                            text.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text('$remaining days left to plan',
+                        style:
+                            text.bodySmall?.copyWith(color: AppColors.inkMuted)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _extending ? null : _loadNextWeek,
+              icon: _extending
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.add_rounded),
+              label: Text(_extending
+                  ? 'Building next $next days…'
+                  : 'Load next $next days'),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Uses 1 credit · free on Unlimited',
+            style: text.bodySmall?.copyWith(color: AppColors.inkFaint),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Generates the next batch of days, appends them, persists, and (if reminders
+  /// are on) reschedules so the new days get alarms too. Out of credits → paywall.
+  Future<void> _loadNextWeek() async {
+    final req = _sp.request;
+    if (req == null || _extending) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    final nextStart = _plan.days.isEmpty ? 1 : _plan.days.last.day + 1;
+    // Dishes from the last detailed week, so the model doesn't repeat them.
+    final recent = _plan.days
+        .skip((_plan.days.length - 7).clamp(0, _plan.days.length))
+        .expand((d) => d.meals.map((m) => m.dish.trim()))
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .toList();
+
+    final body = <String, dynamic>{
+      ...req,
+      'startDay': nextStart,
+      'avoidDishes': recent,
+    };
+
+    setState(() => _extending = true);
+    try {
+      final batch = await ApiService.generatePlan(body);
+      if (batch.days.isEmpty) {
+        if (!mounted) return;
+        setState(() => _extending = false);
+        messenger.showSnackBar(const SnackBar(
+            content: Text('No more days were returned. Try again.')));
+        return;
+      }
+      final merged = _plan.withAppendedDays(batch.days);
+      final added = merged.days.length - _plan.days.length;
+      await PlanStorage.upsert(_sp.copyWith(plan: merged));
+      // Extend reminders over the new days when they're enabled.
+      final refreshed =
+          _scheduled ? await _rescheduleAndRefresh() : _sp.copyWith(plan: merged);
+      if (!mounted) return;
+      setState(() {
+        _plan = merged;
+        _sp = refreshed;
+        _extending = false;
+      });
+      messenger.showSnackBar(SnackBar(
+        content: Text('Added $added days — '
+            '${merged.days.length} of ${merged.requestedDays} ready.'),
+      ));
+    } on PaymentRequiredException catch (e) {
+      if (!mounted) return;
+      setState(() => _extending = false);
+      await _openPaywallThenExtend(e.message);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _extending = false);
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _extending = false);
+      messenger.showSnackBar(SnackBar(content: Text('Could not load more days. $e')));
+    }
+  }
+
+  /// Opens the paywall; if the user gains credits, immediately retries the load.
+  Future<void> _openPaywallThenExtend(String reason) async {
+    final bought = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => PaywallScreen(reason: reason),
+    ));
+    if (!mounted) return;
+    if (bought == true ||
+        BillingService.instance.entitlements.value.canGenerate) {
+      _loadNextWeek();
+    }
   }
 
   // ─────────────────────────────────────────────────────── reminder bar UI ──

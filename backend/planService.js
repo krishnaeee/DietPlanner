@@ -29,12 +29,16 @@ function parsePlanJson(text) {
 }
 
 export async function generatePlan(input) {
-  const plannedDays = Math.min(input.targetDays, MAX_PLAN_DAYS);
-  const { system, user } = buildPrompt(input, plannedDays);
+  // Continuation support: generate days [startDay .. startDay+plannedDays-1] of
+  // a longer journey. startDay defaults to 1 (a fresh first week).
+  const startDay = Math.max(1, Math.round(input.startDay || 1));
+  const remaining = Math.max(1, input.targetDays - (startDay - 1));
+  const plannedDays = Math.min(remaining, MAX_PLAN_DAYS);
+  const { system, user } = buildPrompt({ ...input, startDay }, plannedDays);
   const provider = getProvider();
 
   console.log(
-    `[gen] calling ${provider.name}:${provider.model} (effort=${EFFORT}, maxTokens=${MAX_TOKENS}) for ${plannedDays} day(s)…`,
+    `[gen] calling ${provider.name}:${provider.model} (effort=${EFFORT}, maxTokens=${MAX_TOKENS}) for ${plannedDays} day(s) from day ${startDay}…`,
   );
   const t0 = Date.now();
   // Heartbeat so you can see it's still working (vs. hung) in the console.
@@ -70,8 +74,10 @@ export async function generatePlan(input) {
     plan,
     meta: {
       requestedDays: input.targetDays,
+      startDay,
       plannedDays,
-      truncated: input.targetDays > plannedDays,
+      // More days remain after this batch (the client can request the next one).
+      truncated: startDay - 1 + plannedDays < input.targetDays,
       provider: provider.name,
       model: provider.model,
     },
