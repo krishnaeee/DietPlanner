@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/billing.dart';
 import '../services/auth_service.dart';
+import '../services/billing_service.dart';
 import '../services/notification_service.dart';
 import '../services/plan_storage.dart';
+import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'paywall_screen.dart';
 import 'plan_screen.dart';
 
 class InputScreen extends StatefulWidget {
@@ -53,6 +57,13 @@ class _InputScreenState extends State<InputScreen> {
     if (!mounted) return;
     setState(() => _plans = list);
     await NotificationService.instance.rescheduleAll(list);
+    BillingService.instance.refresh(); // load credit balance for the header chip
+  }
+
+  void _openPaywall() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const PaywallScreen()),
+    );
   }
 
   Future<void> _loadSaved() async {
@@ -115,6 +126,7 @@ class _InputScreenState extends State<InputScreen> {
     );
     if (ok != true) return;
     await PlanStorage.delete(p.id);
+    await TrackingStorage.remove(p.id); // drop this plan's tracking data too
     // Rebuild reminders for the remaining plans (drops the deleted one's).
     final all = await PlanStorage.loadAll();
     final counts = await NotificationService.instance.rescheduleAll(all);
@@ -152,6 +164,14 @@ class _InputScreenState extends State<InputScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please fix the highlighted fields.')),
       );
+      return;
+    }
+
+    // If we already know there's no balance, show the paywall up front rather
+    // than navigating in and bouncing off the backend's 402. (The backend is
+    // still the source of truth — this is just a faster path.)
+    if (!BillingService.instance.entitlements.value.canGenerate) {
+      _openPaywall();
       return;
     }
 
@@ -209,7 +229,14 @@ class _InputScreenState extends State<InputScreen> {
             title: 'AI Diet Planner',
             subtitle: 'Tell us a little about you and we\'ll build a day-by-day plan with food local to you.',
             badge: const _LeafBadge(),
-            trailing: const _AccountMenu(),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _CreditChip(onTap: _openPaywall),
+                const SizedBox(width: 8),
+                _AccountMenu(onPlans: _openPaywall),
+              ],
+            ),
           ),
           Expanded(
             child: Form(
@@ -493,9 +520,57 @@ class _LeafBadge extends StatelessWidget {
   }
 }
 
-/// Header account menu: shows the signed-in email and a Log out action.
+/// A tappable balance pill in the header: "3" credits or "∞" when unlimited.
+/// Rebuilds whenever the billing balance changes.
+class _CreditChip extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CreditChip({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Entitlements>(
+      valueListenable: BillingService.instance.entitlements,
+      builder: (context, ent, _) {
+        final unlimited = ent.subscriptionActive;
+        return Material(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    unlimited ? Icons.all_inclusive_rounded : Icons.stars_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    unlimited ? 'Unlimited' : '${ent.credits}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Header account menu: shows the signed-in email, Plans & credits, and Log out.
 class _AccountMenu extends StatelessWidget {
-  const _AccountMenu();
+  final VoidCallback onPlans;
+  const _AccountMenu({required this.onPlans});
 
   @override
   Widget build(BuildContext context) {
@@ -503,7 +578,9 @@ class _AccountMenu extends StatelessWidget {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.account_circle_rounded, color: Colors.white),
       onSelected: (v) async {
-        if (v == 'logout') {
+        if (v == 'plans') {
+          onPlans();
+        } else if (v == 'logout') {
           // Clear this user's pending reminders before switching accounts.
           await NotificationService.instance.cancelAll();
           await AuthService.instance.logout();
@@ -515,6 +592,7 @@ class _AccountMenu extends StatelessWidget {
             enabled: false,
             child: Text(email, style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
+        const PopupMenuItem<String>(value: 'plans', child: Text('Plans & credits')),
         const PopupMenuItem<String>(value: 'logout', child: Text('Log out')),
       ],
     );

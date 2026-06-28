@@ -4,11 +4,30 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../models/diet_plan.dart';
+import '../models/tracking.dart';
 import '../services/api_service.dart';
+import '../services/billing_service.dart';
 import '../services/notification_service.dart';
 import '../services/plan_storage.dart';
+import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'grocery_list_screen.dart';
+import 'paywall_screen.dart';
+import 'progress_screen.dart';
+
+const _kWeekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const _kMonths = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+
+/// "5 Jun" — compact form for day-selector pills.
+String _shortDate(DateTime d) => '${d.day} ${_kMonths[d.month - 1]}';
+
+/// "Mon, 5 Jun" — full form for headers and reminder text.
+String _fullDate(DateTime d) =>
+    '${_kWeekdays[d.weekday - 1]}, ${d.day} ${_kMonths[d.month - 1]}';
 
 class PlanScreen extends StatefulWidget {
   /// Generate a new plan from [requestBody] (named [planName]), or open a saved
@@ -54,6 +73,12 @@ class _PlanScreenState extends State<PlanScreen> {
     }
     final plan = await ApiService.generatePlan(widget.requestBody!);
     final all = await PlanStorage.loadAll();
+    final body = widget.requestBody!;
+    double? metric(String k) {
+      final v = body[k];
+      return v is num ? v.toDouble() : double.tryParse('${v ?? ''}');
+    }
+
     final sp = StoredPlan(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       name: widget.planName.trim().isEmpty
@@ -66,6 +91,8 @@ class _PlanScreenState extends State<PlanScreen> {
       remindersScheduled: false,
       scheduledCount: 0,
       savedAt: DateTime.now(),
+      startWeightKg: metric('weightKg'),
+      targetWeightKg: metric('targetWeightKg'),
     );
     await PlanStorage.upsert(sp); // new plans are added, not overwritten
     _current = sp;
@@ -74,6 +101,22 @@ class _PlanScreenState extends State<PlanScreen> {
 
   void _retry() {
     setState(() => _future = _load());
+  }
+
+  /// Opens the paywall; if the user buys (or has a balance on return), retries
+  /// generation automatically.
+  Future<void> _openPaywallThenRetry() async {
+    final bought = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => const PaywallScreen(
+          reason: 'You need credits or an unlimited plan to generate this.',
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (bought == true || BillingService.instance.entitlements.value.canGenerate) {
+      _retry();
+    }
   }
 
   static DateTime _defaultStart() {
@@ -100,6 +143,20 @@ class _PlanScreenState extends State<PlanScreen> {
             );
           }
           if (snap.hasError) {
+            // Out of credits → show a paywall prompt instead of a generic error.
+            if (snap.error is PaymentRequiredException) {
+              return Column(
+                children: [
+                  const GradientHeader(title: 'Your diet plan', showBack: true),
+                  Expanded(
+                    child: _PaywallPrompt(
+                      message: (snap.error as PaymentRequiredException).message,
+                      onOpen: _openPaywallThenRetry,
+                    ),
+                  ),
+                ],
+              );
+            }
             return Column(
               children: [
                 const GradientHeader(title: 'Your diet plan', showBack: true),
@@ -309,6 +366,58 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
+// ──────────────────────────────────────────────────────── out-of-credits ──
+
+class _PaywallPrompt extends StatelessWidget {
+  final String message;
+  final VoidCallback onOpen;
+  const _PaywallPrompt({required this.message, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: AppColors.accent.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.lock_rounded, color: AppColors.accent, size: 40),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Out of credits',
+              style: text.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: text.bodyMedium?.copyWith(color: AppColors.inkMuted, height: 1.4),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: onOpen,
+              icon: const Icon(Icons.workspace_premium_rounded),
+              label: const Text('See plans & credits'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ────────────────────────────────────────────────────────────── plan view ──
 
 class _PlanView extends StatefulWidget {
@@ -334,27 +443,70 @@ class _PlanViewState extends State<_PlanView> {
 
   late StoredPlan _sp;
   bool _busy = false;
+  PlanTracking _tracking = PlanTracking();
 
   final ScrollController _scroll = ScrollController();
   final GlobalKey _mealKey = GlobalKey();
   int? _highlight; // meal index to highlight (from a tapped notification)
 
   bool get _scheduled => _sp.remindersScheduled;
+  bool get _repeat => _sp.repeatForever;
   int get _count => _sp.scheduledCount;
   DateTime get _start => _sp.startDate;
+
+  /// Calendar date of a given day number (Day 1 == [_start]).
+  DateTime _dateForDay(int dayNumber) {
+    final s = DateTime(_start.year, _start.month, _start.day);
+    return s.add(Duration(days: dayNumber - 1));
+  }
+
+  /// Index (0-based) of the day whose date is today, or null if today falls
+  /// outside the plan's window.
+  int? get _todayIndex {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final s = DateTime(_start.year, _start.month, _start.day);
+    final diff = today.difference(s).inDays;
+    if (diff < 0 || diff >= widget.plan.days.length) return null;
+    return diff;
+  }
 
   @override
   void initState() {
     super.initState();
     _sp = widget.stored;
     final n = widget.plan.days.length;
-    if (n > 0 && widget.initialDay != null) {
-      _selected = widget.initialDay!.clamp(0, n - 1);
+    if (n > 0) {
+      if (widget.initialDay != null) {
+        // Deep-linked from a tapped notification — honour that day.
+        _selected = widget.initialDay!.clamp(0, n - 1);
+      } else {
+        // Opening the plan normally — land on today if it's within the plan.
+        _selected = _todayIndex ?? 0;
+      }
     }
     _highlight = widget.highlightMeal;
     if (_highlight != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _revealHighlighted());
     }
+    _loadTracking();
+  }
+
+  Future<void> _loadTracking() async {
+    final t = await TrackingStorage.load(_sp.id);
+    if (mounted) setState(() => _tracking = t);
+  }
+
+  Future<void> _toggleMeal(int dayIndex, int mealIndex) async {
+    final next = _tracking.toggleMeal(dayIndex, mealIndex);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(_sp.id, next);
+  }
+
+  void _openProgress() {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => ProgressScreen(stored: _sp)))
+        .then((_) => _loadTracking()); // weight/water may have changed
   }
 
   /// Scrolls the tapped meal into view, holds the highlight briefly, then clears.
@@ -389,13 +541,37 @@ class _PlanViewState extends State<_PlanView> {
 
     return Column(
       children: [
-        GradientHeader(title: 'Your diet plan', subtitle: sub, showBack: true),
+        GradientHeader(
+          title: 'Your diet plan',
+          subtitle: sub,
+          showBack: true,
+          trailing: _HeaderAction(
+            icon: Icons.insights_rounded,
+            label: 'Progress',
+            onTap: _openProgress,
+          ),
+        ),
         Expanded(
           child: ListView(
             controller: _scroll,
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
             children: [
               _SummaryCard(plan: plan),
+              if (days.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _GroceryListButton(
+                  windowDays: math.min(7, days.length - _selected),
+                  onTap: () {
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => GroceryListScreen(
+                        plan: plan,
+                        startIndex: _selected,
+                        windowDays: 7,
+                      ),
+                    ));
+                  },
+                ),
+              ],
               if (plan.truncated) ...[
                 const SizedBox(height: 12),
                 _InfoBanner(
@@ -408,6 +584,8 @@ class _PlanViewState extends State<_PlanView> {
                 _DaySelector(
                   count: days.length,
                   selected: _selected,
+                  todayIndex: _todayIndex,
+                  dateForDay: _dateForDay,
                   onSelect: (i) => setState(() {
                     _selected = i;
                     _highlight = null; // switching days cancels the deep-link highlight
@@ -427,8 +605,12 @@ class _PlanViewState extends State<_PlanView> {
                   child: _DayDetail(
                     key: ValueKey(_selected),
                     day: days[_selected.clamp(0, days.length - 1)],
+                    date: _dateForDay(days[_selected.clamp(0, days.length - 1)].day),
+                    isToday: _todayIndex == _selected,
                     highlightIndex: _highlight,
                     mealKey: _mealKey,
+                    isDone: (m) => _tracking.isMealDone(_selected, m),
+                    onToggle: (m) => _toggleMeal(_selected, m),
                   ),
                 ),
               ] else
@@ -472,34 +654,55 @@ class _PlanViewState extends State<_PlanView> {
                 child: Center(child: CircularProgressIndicator()),
               )
             : _scheduled
-                ? Row(
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: AppColors.brand.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.notifications_active_rounded,
-                            color: AppColors.brand),
+                      Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: AppColors.brand.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.notifications_active_rounded,
+                                color: AppColors.brand),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Reminders on',
+                                    style: text.titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w800)),
+                                Text('$_count set · Day 1 ${_fmtDate(_start)}',
+                                    style: text.bodySmall
+                                        ?.copyWith(color: AppColors.inkMuted)),
+                              ],
+                            ),
+                          ),
+                          TextButton(
+                              onPressed: _turnOff, child: const Text('Turn off')),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Reminders on',
-                                style:
-                                    text.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                            Text('$_count set · Day 1 ${_fmtDate(_start)}',
-                                style: text.bodySmall
-                                    ?.copyWith(color: AppColors.inkMuted)),
-                          ],
+                      const Divider(height: 8),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        value: _repeat,
+                        onChanged: _toggleRepeat,
+                        activeThumbColor: AppColors.brand,
+                        title: Text('Repeat after plan ends',
+                            style:
+                                text.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                        subtitle: Text(
+                          'Keep daily reminders going by cycling the menu',
+                          style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
                         ),
                       ),
-                      TextButton(onPressed: _turnOff, child: const Text('Turn off')),
                     ],
                   )
                 : Column(
@@ -575,6 +778,25 @@ class _PlanViewState extends State<_PlanView> {
     messenger.showSnackBar(const SnackBar(content: Text('Reminders turned off.')));
   }
 
+  /// Toggles whether reminders keep cycling the menu after the plan's last day,
+  /// then reschedules so the change takes effect immediately.
+  Future<void> _toggleRepeat(bool on) async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    await PlanStorage.upsert(_sp.copyWith(repeatForever: on));
+    final refreshed = await _rescheduleAndRefresh();
+    if (!mounted) return;
+    setState(() {
+      _sp = refreshed;
+      _busy = false;
+    });
+    messenger.showSnackBar(SnackBar(
+      content: Text(on
+          ? 'Reminders will keep repeating after the plan ends.'
+          : 'Reminders will stop after the last plan day.'),
+    ));
+  }
+
   /// Reschedules notifications for every active plan and re-reads this plan's
   /// updated record (with its fresh scheduled count).
   Future<StoredPlan> _rescheduleAndRefresh() async {
@@ -631,14 +853,7 @@ class _PlanViewState extends State<_PlanView> {
     );
   }
 
-  String _fmtDate(DateTime d) {
-    const wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const mo = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    return '${wd[d.weekday - 1]}, ${d.day} ${mo[d.month - 1]}';
-  }
+  String _fmtDate(DateTime d) => _fullDate(d);
 }
 
 class _SummaryCard extends StatelessWidget {
@@ -710,6 +925,68 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
+/// Tappable card that opens the consolidated grocery list for the upcoming days.
+class _GroceryListButton extends StatelessWidget {
+  final int windowDays;
+  final VoidCallback onTap;
+  const _GroceryListButton({required this.windowDays, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final label = windowDays <= 1
+        ? "This day's grocery list"
+        : 'Next $windowDays-day grocery list';
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.card),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            border: Border.all(color: AppColors.line),
+            boxShadow: softShadow(opacity: 0.05, blur: 14, y: 6),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: AppColors.brand.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.shopping_cart_rounded,
+                    color: AppColors.brand, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: text.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text(
+                      'One deduped shopping list with combined quantities',
+                      style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.inkFaint),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _InfoBanner extends StatelessWidget {
   final String text;
   const _InfoBanner({required this.text});
@@ -742,45 +1019,118 @@ class _InfoBanner extends StatelessWidget {
   }
 }
 
-class _DaySelector extends StatelessWidget {
+class _DaySelector extends StatefulWidget {
   final int count;
   final int selected;
+  final int? todayIndex;
+  final DateTime Function(int dayNumber) dateForDay;
   final ValueChanged<int> onSelect;
   const _DaySelector({
     required this.count,
     required this.selected,
+    required this.todayIndex,
+    required this.dateForDay,
     required this.onSelect,
   });
 
   @override
+  State<_DaySelector> createState() => _DaySelectorState();
+}
+
+class _DaySelectorState extends State<_DaySelector> {
+  static const double _pillWidth = 78;
+  static const double _gap = 8;
+
+  final ScrollController _ctrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected());
+  }
+
+  @override
+  void didUpdateWidget(covariant _DaySelector old) {
+    super.didUpdateWidget(old);
+    if (old.selected != widget.selected) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected());
+    }
+  }
+
+  /// Centres the selected pill in the viewport (clamped to scroll bounds).
+  void _scrollToSelected() {
+    if (!_ctrl.hasClients) return;
+    const itemExtent = _pillWidth + _gap;
+    final viewport = _ctrl.position.viewportDimension;
+    final target = widget.selected * itemExtent - (viewport - itemExtent) / 2;
+    _ctrl.animateTo(
+      target.clamp(0.0, _ctrl.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 44,
+      height: 60,
       child: ListView.separated(
+        controller: _ctrl,
         scrollDirection: Axis.horizontal,
-        itemCount: count,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemCount: widget.count,
+        separatorBuilder: (_, _) => const SizedBox(width: _gap),
         itemBuilder: (context, i) {
-          final sel = i == selected;
+          final sel = i == widget.selected;
+          final isToday = i == widget.todayIndex;
+          final dateColor = sel
+              ? Colors.white.withValues(alpha: 0.85)
+              : (isToday ? AppColors.accent : AppColors.inkMuted);
           return GestureDetector(
-            onTap: () => onSelect(i),
+            onTap: () => widget.onSelect(i),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 160),
+              width: _pillWidth,
               alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
               decoration: BoxDecoration(
                 color: sel ? AppColors.brand : AppColors.surface,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: sel ? AppColors.brand : AppColors.line),
+                border: Border.all(
+                  color: sel
+                      ? AppColors.brand
+                      : (isToday ? AppColors.accent : AppColors.line),
+                  width: isToday && !sel ? 1.6 : 1,
+                ),
                 boxShadow: sel ? softShadow(opacity: 0.10, blur: 12, y: 6) : null,
               ),
-              child: Text(
-                'Day ${i + 1}',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                  color: sel ? Colors.white : AppColors.inkMuted,
-                ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    isToday ? 'Today' : 'Day ${i + 1}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13.5,
+                      color: sel
+                          ? Colors.white
+                          : (isToday ? AppColors.accent : AppColors.inkMuted),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _shortDate(widget.dateForDay(i + 1)),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11.5,
+                      color: dateColor,
+                    ),
+                  ),
+                ],
               ),
             ),
           );
@@ -792,21 +1142,96 @@ class _DaySelector extends StatelessWidget {
 
 class _DayDetail extends StatelessWidget {
   final DayPlan day;
+  final DateTime date;
+  final bool isToday;
   final int? highlightIndex;
   final Key? mealKey;
-  const _DayDetail({super.key, required this.day, this.highlightIndex, this.mealKey});
+  final bool Function(int meal) isDone;
+  final void Function(int meal) onToggle;
+  const _DayDetail({
+    super.key,
+    required this.day,
+    required this.date,
+    required this.isToday,
+    this.highlightIndex,
+    this.mealKey,
+    required this.isDone,
+    required this.onToggle,
+  });
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final doneCount =
+        List.generate(day.meals.length, (m) => isDone(m)).where((d) => d).length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text('Day ${day.day}',
-                style: text.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-            const Spacer(),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text('Day ${day.day}',
+                          style: text.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w800)),
+                      if (isToday) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent,
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          child: Text(
+                            'TODAY',
+                            style: text.labelSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _fullDate(date),
+                    style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (day.meals.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: AppColors.brand.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.task_alt_rounded,
+                        color: AppColors.brand, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$doneCount/${day.meals.length}',
+                      style: text.labelLarge?.copyWith(
+                        color: AppColors.brand,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
@@ -836,7 +1261,12 @@ class _DayDetail extends StatelessWidget {
           return Padding(
             key: hi ? mealKey : null,
             padding: const EdgeInsets.only(bottom: 12),
-            child: _MealCard(meal: day.meals[m], highlight: hi),
+            child: _MealCard(
+              meal: day.meals[m],
+              highlight: hi,
+              done: isDone(m),
+              onToggle: () => onToggle(m),
+            ),
           );
         }),
       ],
@@ -847,20 +1277,32 @@ class _DayDetail extends StatelessWidget {
 class _MealCard extends StatelessWidget {
   final Meal meal;
   final bool highlight;
-  const _MealCard({required this.meal, this.highlight = false});
+  final bool done;
+  final VoidCallback? onToggle;
+  const _MealCard({
+    required this.meal,
+    this.highlight = false,
+    this.done = false,
+    this.onToggle,
+  });
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final color = AppColors.forMeal(meal.name);
+    final bg = highlight
+        ? color.withValues(alpha: 0.06)
+        : (done ? AppColors.brand.withValues(alpha: 0.05) : AppColors.surface);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOut,
       decoration: BoxDecoration(
-        color: highlight ? color.withValues(alpha: 0.06) : AppColors.surface,
+        color: bg,
         borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(
-          color: highlight ? color : Colors.transparent,
+          color: highlight
+              ? color
+              : (done ? AppColors.brand.withValues(alpha: 0.5) : Colors.transparent),
           width: 2,
         ),
         boxShadow: softShadow(
@@ -911,6 +1353,10 @@ class _MealCard extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                if (onToggle != null) ...[
+                  const SizedBox(width: 10),
+                  _MealCheck(done: done, onTap: onToggle!),
+                ],
               ],
             ),
             const SizedBox(height: 12),
@@ -962,6 +1408,80 @@ class _MealCard extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A round check toggle shown on each meal card to mark it eaten.
+class _MealCheck extends StatelessWidget {
+  final bool done;
+  final VoidCallback onTap;
+  const _MealCheck({required this.done, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      checked: done,
+      label: done ? 'Meal eaten' : 'Mark meal eaten',
+      child: Material(
+        color: done ? AppColors.brand : AppColors.fieldFill,
+        shape: CircleBorder(
+          side: BorderSide(color: done ? AppColors.brand : AppColors.line, width: 1.5),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 36,
+            height: 36,
+            child: Icon(
+              Icons.check_rounded,
+              size: 20,
+              color: done ? Colors.white : AppColors.inkFaint,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A pill button in the gradient header (e.g. "Progress").
+class _HeaderAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _HeaderAction(
+      {required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.18),
+      borderRadius: BorderRadius.circular(AppRadius.pill),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

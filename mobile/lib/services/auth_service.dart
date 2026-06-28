@@ -22,15 +22,21 @@ class AuthService {
 
   static const _tokenKey = 'auth_token';
   static const _emailKey = 'auth_email';
+  static const _userIdKey = 'auth_user_id';
 
   String? _token;
   String? _email;
+  String? _userId;
 
   /// true = logged in. The auth gate rebuilds when this flips.
   final ValueNotifier<bool> authState = ValueNotifier<bool>(false);
 
   String? get token => _token;
   String? get email => _email;
+
+  /// The backend user id (as a string). Used as the RevenueCat app user id so
+  /// the purchase webhook can attribute the payment to this account.
+  String? get userId => _userId;
   bool get isLoggedIn => _token != null;
 
   /// Loads a saved session into memory. Call once at startup.
@@ -38,6 +44,7 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString(_tokenKey);
     _email = prefs.getString(_emailKey);
+    _userId = prefs.getString(_userIdKey);
     authState.value = _token != null;
   }
 
@@ -109,7 +116,8 @@ class AuthService {
       }
       final user = body['user'];
       final em = (user is Map ? user['email'] : null)?.toString() ?? account.email;
-      await _persist(token, em);
+      final uid = (user is Map ? user['id'] : null)?.toString();
+      await _persist(token, em, uid);
       return true;
     }
     throw AuthException(_errorOf(body, resp.statusCode));
@@ -139,7 +147,8 @@ class AuthService {
       }
       final user = body['user'];
       final em = (user is Map ? user['email'] : null)?.toString() ?? email;
-      await _persist(token, em);
+      final uid = (user is Map ? user['id'] : null)?.toString();
+      await _persist(token, em, uid);
       return;
     }
     throw AuthException(_errorOf(body, resp.statusCode));
@@ -167,18 +176,26 @@ class AuthService {
   Future<void> logout() async {
     _token = null;
     _email = null;
+    _userId = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
     await prefs.remove(_emailKey);
+    await prefs.remove(_userIdKey);
     authState.value = false;
   }
 
-  Future<void> _persist(String token, String email) async {
+  Future<void> _persist(String token, String email, String? userId) async {
     _token = token;
     _email = email;
+    _userId = userId;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, token);
     await prefs.setString(_emailKey, email);
+    if (userId != null) {
+      await prefs.setString(_userIdKey, userId);
+    } else {
+      await prefs.remove(_userIdKey);
+    }
     authState.value = true;
   }
 

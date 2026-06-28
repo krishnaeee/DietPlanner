@@ -5,7 +5,16 @@ import jwt from 'jsonwebtoken';
 import { randomBytes } from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
 
-import { createUser, findUserByEmail, findUserById, linkGoogle } from './db.js';
+import { createUser, findUserByEmail, findUserById, linkGoogle, addCredits } from './db.js';
+import { SIGNUP_FREE_CREDITS } from './billing.js';
+
+/// Grants the free starter credits to a freshly created account (recorded in
+/// the ledger as a 'grant' so the balance has an audit trail).
+function grantSignupCredits(userId) {
+  if (SIGNUP_FREE_CREDITS > 0) {
+    addCredits(userId, SIGNUP_FREE_CREDITS, { kind: 'grant', provider: 'signup' });
+  }
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-insecure-secret-change-me';
 const JWT_EXPIRES = '30d';
@@ -51,7 +60,8 @@ authRouter.post('/signup', async (req, res) => {
 
   const hash = await bcrypt.hash(password, 10);
   const user = createUser(email, hash);
-  console.log(`[auth] signup: ${email} (id ${user.id})`);
+  grantSignupCredits(user.id);
+  console.log(`[auth] signup: ${email} (id ${user.id}) +${SIGNUP_FREE_CREDITS} free credits`);
   return res
     .status(201)
     .json({ token: signToken(user), user: { id: user.id, email: user.email } });
@@ -120,6 +130,7 @@ authRouter.post('/google', async (req, res) => {
     // No local password for Google accounts — store an unusable random hash.
     const hash = await bcrypt.hash(randomBytes(24).toString('hex'), 10);
     user = createUser(email, hash);
+    grantSignupCredits(user.id);
   }
   linkGoogle(user.id, sub);
   console.log(`[auth] google login: ${email} (id ${user.id})`);

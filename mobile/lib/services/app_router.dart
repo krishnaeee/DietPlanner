@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../screens/plan_screen.dart';
+import '../screens/progress_screen.dart';
 import 'plan_storage.dart';
 
 /// Global navigator key so notification taps can navigate without a BuildContext.
@@ -22,6 +23,7 @@ Future<void> routeFromNotification(String payload) async {
 
   final planId = (data['planId'] ?? '').toString();
   if (planId.isEmpty) return;
+  final type = (data['type'] ?? '').toString();
   final day = _asInt(data['day'], 0);
   final meal = _asInt(data['meal'], -1);
 
@@ -38,6 +40,11 @@ Future<void> routeFromNotification(String payload) async {
 
   final nav = appNavigatorKey.currentState;
   if (nav == null) return;
+  // Hydration nudges open the progress dashboard; meal/grocery open the plan.
+  if (type == 'water') {
+    nav.push(MaterialPageRoute(builder: (_) => ProgressScreen(stored: sp)));
+    return;
+  }
   nav.push(MaterialPageRoute(
     builder: (_) => PlanScreen(
       stored: sp,

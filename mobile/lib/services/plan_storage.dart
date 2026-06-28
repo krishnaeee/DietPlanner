@@ -18,8 +18,19 @@ class StoredPlan {
   final String location;
   final DateTime startDate; // calendar date of Day 1
   final bool remindersScheduled;
+
+  /// When true, reminders keep going after the plan's last day by cycling the
+  /// menu (Day 1 again, Day 2, …). The schedule is a rolling window re-armed on
+  /// each app launch, since local notifications can't be scheduled forever.
+  final bool repeatForever;
+
   final int scheduledCount;
   final DateTime savedAt;
+
+  // Body metrics captured at generation time, so the progress screen can show
+  // start → current → target weight. Null for plans saved before this existed.
+  final double? startWeightKg;
+  final double? targetWeightKg;
 
   StoredPlan({
     required this.id,
@@ -31,12 +42,16 @@ class StoredPlan {
     required this.remindersScheduled,
     required this.scheduledCount,
     required this.savedAt,
+    this.repeatForever = false,
+    this.startWeightKg,
+    this.targetWeightKg,
   });
 
   StoredPlan copyWith({
     String? name,
     DateTime? startDate,
     bool? remindersScheduled,
+    bool? repeatForever,
     int? scheduledCount,
   }) =>
       StoredPlan(
@@ -47,8 +62,11 @@ class StoredPlan {
         location: location,
         startDate: startDate ?? this.startDate,
         remindersScheduled: remindersScheduled ?? this.remindersScheduled,
+        repeatForever: repeatForever ?? this.repeatForever,
         scheduledCount: scheduledCount ?? this.scheduledCount,
         savedAt: savedAt,
+        startWeightKg: startWeightKg,
+        targetWeightKg: targetWeightKg,
       );
 
   Map<String, dynamic> toJson() => {
@@ -59,9 +77,15 @@ class StoredPlan {
         'location': location,
         'startDate': startDate.toIso8601String(),
         'remindersScheduled': remindersScheduled,
+        'repeatForever': repeatForever,
         'scheduledCount': scheduledCount,
         'savedAt': savedAt.toIso8601String(),
+        if (startWeightKg != null) 'startWeightKg': startWeightKg,
+        if (targetWeightKg != null) 'targetWeightKg': targetWeightKg,
       };
+
+  static double? _optDouble(dynamic v) =>
+      v == null ? null : (v is num ? v.toDouble() : double.tryParse('$v'));
 
   static StoredPlan fromJson(Map<String, dynamic> m) => StoredPlan(
         id: (m['id'] ?? '').toString(),
@@ -72,8 +96,11 @@ class StoredPlan {
         startDate:
             DateTime.tryParse((m['startDate'] ?? '').toString()) ?? DateTime.now(),
         remindersScheduled: m['remindersScheduled'] == true,
+        repeatForever: m['repeatForever'] == true,
         scheduledCount: m['scheduledCount'] is int ? m['scheduledCount'] as int : 0,
         savedAt: DateTime.tryParse((m['savedAt'] ?? '').toString()) ?? DateTime.now(),
+        startWeightKg: _optDouble(m['startWeightKg']),
+        targetWeightKg: _optDouble(m['targetWeightKg']),
       );
 }
 

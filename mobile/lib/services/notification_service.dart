@@ -8,6 +8,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../models/diet_plan.dart';
 import 'plan_storage.dart';
+import 'tracking_storage.dart';
 
 /// Schedules local notifications for a diet plan:
 ///  - a grocery reminder at 7 PM the evening before each day, and
@@ -28,6 +29,20 @@ class NotificationService {
   static const _channelId = 'diet_reminders';
   static const _channelName = 'Diet reminders';
   static const _channelDesc = 'Grocery and meal reminders for your diet plan';
+
+  static const _waterChannelId = 'water_reminders';
+  static const _waterChannelName = 'Water reminders';
+  static const _waterChannelDesc = 'Daily hydration reminders';
+
+  // Times of day (24h) at which hydration nudges fire when water reminders
+  // are on. Kept short so a missed glass is reinforced through the day.
+  static const _waterHours = [10, 13, 16, 19];
+
+  // How many days ahead a [StoredPlan.repeatForever] plan schedules in one pass.
+  // The window slides forward each time [refreshAll] runs (app launch), so the
+  // reminders effectively never stop. Kept modest to respect the OS cap on the
+  // number of pending notifications.
+  static const _repeatHorizonDays = 14;
 
   Future<void> init() async {
     if (_ready || kIsWeb) {
@@ -53,14 +68,20 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onResponse,
     );
 
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(const AndroidNotificationChannel(
-          _channelId,
-          _channelName,
-          description: _channelDesc,
-          importance: Importance.high,
-        ));
+    final androidPlugin = _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
+      _channelId,
+      _channelName,
+      description: _channelDesc,
+      importance: Importance.high,
+    ));
+    await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
+      _waterChannelId,
+      _waterChannelName,
+      description: _waterChannelDesc,
+      importance: Importance.high,
+    ));
     _ready = true;
   }
 
@@ -115,23 +136,90 @@ class NotificationService {
     final now = tz.TZDateTime.now(tz.local);
     final counts = <String, int>{};
     for (final sp in plans) {
-      if (!sp.remindersScheduled) continue;
-      counts[sp.id] = await _scheduleOne(sp, now);
+      var count = 0;
+      if (sp.remindersScheduled) count += await _scheduleOne(sp, now);
+      // Hydration reminders are independent of meal/grocery reminders.
+      final tracking = await TrackingStorage.load(sp.id);
+      if (tracking.waterRemindersOn) count += await _scheduleWater(sp, now);
+      if (count > 0) counts[sp.id] = count;
     }
     return counts;
   }
 
+  /// Reschedules reminders for every saved plan and writes back each plan's
+  /// fresh scheduled count. Call on app launch so repeating plans slide their
+  /// rolling window forward (and recover reminders lost to a reboot).
+  Future<void> refreshAll() async {
+    if (kIsWeb) return;
+    final all = await PlanStorage.loadAll();
+    final counts = await rescheduleAll(all);
+    for (final p in all) {
+      final c = counts[p.id] ?? 0;
+      if (p.scheduledCount != c) {
+        await PlanStorage.upsert(p.copyWith(scheduledCount: c));
+      }
+    }
+  }
+
+  /// Schedules the day's remaining (then daily-repeating) hydration nudges.
+  Future<int> _scheduleWater(StoredPlan sp, tz.TZDateTime now) async {
+    final base = sp.slot * 100000;
+    final tag = sp.name.trim().isEmpty ? '' : ' · ${sp.name.trim()}';
+    var count = 0;
+    for (var k = 0; k < _waterHours.length; k++) {
+      var when = tz.TZDateTime(tz.local, now.year, now.month, now.day, _waterHours[k], 0);
+      if (!when.isAfter(now)) when = when.add(const Duration(days: 1));
+      await _scheduleAt(
+        id: base + 80000 + k, // water ID band, below the 90000 grocery band
+        title: '💧 Time to hydrate$tag',
+        body: 'Drink a glass of water and tick it off in your plan.',
+        when: when,
+        channelId: _waterChannelId,
+        match: DateTimeComponents.time, // repeat daily at this time
+        payload: jsonEncode({'planId': sp.id, 'day': -1, 'meal': -1, 'type': 'water'}),
+      );
+      count++;
+    }
+    return count;
+  }
+
   Future<int> _scheduleOne(StoredPlan sp, tz.TZDateTime now) async {
     final plan = sp.plan;
+    if (plan.days.isEmpty) return 0;
     final startDate = sp.startDate;
     final base = sp.slot * 100000; // per-plan notification ID namespace
     final tag = sp.name.trim().isEmpty ? '' : ' · ${sp.name.trim()}';
     var count = 0;
 
-    for (var i = 0; i < plan.days.length; i++) {
-      final d = plan.days[i];
-      // Date-component arithmetic (DST-safe) for Day i's calendar date.
-      final dayDate = DateTime(startDate.year, startDate.month, startDate.day + i);
+    // The calendar dates to fill, each mapped to a plan-day index. Normally one
+    // pass over the plan's days from the start date; when [repeatForever] is on,
+    // a rolling window from today that cycles the menu so it never runs out.
+    // `offset` namespaces notification IDs within this reschedule pass.
+    final slots = <({int offset, DateTime date, int dayIndex})>[];
+    if (sp.repeatForever) {
+      final today = DateTime(now.year, now.month, now.day);
+      final startDay = DateTime(startDate.year, startDate.month, startDate.day);
+      final from = startDay.isAfter(today) ? startDay : today;
+      final fromSince = from.difference(startDay).inDays; // ≥ 0
+      for (var o = 0; o < _repeatHorizonDays; o++) {
+        final date = DateTime(from.year, from.month, from.day + o);
+        slots.add((
+          offset: o,
+          date: date,
+          dayIndex: (fromSince + o) % plan.days.length,
+        ));
+      }
+    } else {
+      for (var i = 0; i < plan.days.length; i++) {
+        // Date-component arithmetic (DST-safe) for Day i's calendar date.
+        final date = DateTime(startDate.year, startDate.month, startDate.day + i);
+        slots.add((offset: i, date: date, dayIndex: i));
+      }
+    }
+
+    for (final s in slots) {
+      final d = plan.days[s.dayIndex];
+      final dayDate = s.date;
 
       // Grocery reminder at 7 PM the evening before.
       final g = DateTime(dayDate.year, dayDate.month, dayDate.day - 1);
@@ -140,12 +228,13 @@ class NotificationService {
         final items = _ingredientsFor(d);
         if (items.isNotEmpty) {
           await _scheduleAt(
-            id: base + 90000 + i,
+            id: base + 90000 + s.offset,
             title: '🛒 Groceries for Day ${d.day}$tag (tomorrow)',
             body: items,
             when: groceryAt,
             bigText: items,
-            payload: jsonEncode({'planId': sp.id, 'day': i, 'meal': -1, 'type': 'grocery'}),
+            payload: jsonEncode(
+                {'planId': sp.id, 'day': s.dayIndex, 'meal': -1, 'type': 'grocery'}),
           );
           count++;
         }
@@ -161,13 +250,14 @@ class NotificationService {
         if (mealAt.isAfter(now)) {
           final name = meal.name.isEmpty ? 'Meal' : meal.name;
           await _scheduleAt(
-            id: base + i * 10 + m,
+            id: base + s.offset * 10 + m,
             title: meal.dish.isEmpty ? '$name time$tag' : '$name$tag — ${meal.dish}',
             body: meal.description.isEmpty
                 ? 'Time for your ${name.toLowerCase()}.'
                 : meal.description,
             when: mealAt,
-            payload: jsonEncode({'planId': sp.id, 'day': i, 'meal': m, 'type': 'meal'}),
+            payload: jsonEncode(
+                {'planId': sp.id, 'day': s.dayIndex, 'meal': m, 'type': 'meal'}),
           );
           count++;
         }
@@ -189,14 +279,17 @@ class NotificationService {
     required String title,
     required String body,
     required tz.TZDateTime when,
+    String channelId = _channelId,
     String? bigText,
     String? payload,
+    DateTimeComponents? match,
   }) async {
+    final water = channelId == _waterChannelId;
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
-        _channelId,
-        _channelName,
-        channelDescription: _channelDesc,
+        channelId,
+        water ? _waterChannelName : _channelName,
+        channelDescription: water ? _waterChannelDesc : _channelDesc,
         importance: Importance.high,
         priority: Priority.high,
         styleInformation: bigText != null ? BigTextStyleInformation(bigText) : null,
@@ -214,6 +307,7 @@ class NotificationService {
         notificationDetails: details,
         payload: payload,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: match,
       );
     } catch (_) {
       // Exact-alarm permission not granted → still schedule, just inexact.
@@ -225,6 +319,7 @@ class NotificationService {
         notificationDetails: details,
         payload: payload,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        matchDateTimeComponents: match,
       );
     }
   }
