@@ -1,103 +1,123 @@
-// User store backed by Node's built-in SQLite (node:sqlite — no native build).
-import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+// User + billing store backed by Postgres (Neon in production).
+//
+// Set DATABASE_URL to your Neon connection string (the pooled one is fine).
+// Every exported function is async — Postgres queries return promises, unlike
+// the old node:sqlite layer this replaced.
+import pg from 'pg';
 
-const DB_PATH = process.env.DB_PATH || './data/app.db';
-mkdirSync(dirname(DB_PATH), { recursive: true });
+const { Pool } = pg;
 
-const db = new DatabaseSync(DB_PATH);
-db.exec(`
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is not set. Add your Neon Postgres connection string to the ' +
+      'environment (e.g. Render → Environment, or backend/.env for local dev).',
+  );
+}
+
+// Neon requires TLS. rejectUnauthorized:false keeps the handshake working
+// across hosts without shipping Neon's CA bundle — the connection is still
+// encrypted, we just don't pin the certificate.
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: Number(process.env.PGPOOL_MAX || 5),
+});
+
+// ─────────────────────────────────────────────────────────────── schema ──
+// Runs once at import (top-level await) so the tables exist before any query.
+await pool.query(`
   CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    email         TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at    TEXT NOT NULL
+    id             SERIAL PRIMARY KEY,
+    email          TEXT UNIQUE NOT NULL,
+    password_hash  TEXT NOT NULL,
+    google_sub     TEXT,
+    credits        INTEGER NOT NULL DEFAULT 0,
+    sub_status     TEXT,                       -- null | 'active' | 'canceled'
+    sub_expires_at TIMESTAMPTZ,                -- null when no sub
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 `);
 
-// Migration: add columns to pre-existing tables (each guarded so it's safe to
-// re-run). Billing state lives on the user row; history lives in `transactions`.
-const columns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-const addColumn = (name, ddl) => {
-  if (!columns.includes(name)) db.exec(`ALTER TABLE users ADD COLUMN ${ddl}`);
-};
-addColumn('google_sub', 'google_sub TEXT');
-addColumn('credits', 'credits INTEGER NOT NULL DEFAULT 0');
-addColumn('sub_status', 'sub_status TEXT'); // null | 'active' | 'canceled'
-addColumn('sub_expires_at', 'sub_expires_at TEXT'); // ISO; null when no sub
-
-// Append-only ledger of every credit/subscription movement (audit + idempotency).
-db.exec(`
+await pool.query(`
   CREATE TABLE IF NOT EXISTS transactions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    id            BIGSERIAL PRIMARY KEY,
     user_id       INTEGER NOT NULL,
-    kind          TEXT NOT NULL,        -- grant | purchase | spend | refund | subscription
+    kind          TEXT NOT NULL,               -- grant | purchase | spend | refund | subscription
     credits_delta INTEGER NOT NULL DEFAULT 0,
     amount_cents  INTEGER NOT NULL DEFAULT 0,
     currency      TEXT,
     product_id    TEXT,
-    provider      TEXT,                 -- mock | stripe
-    provider_ref  TEXT,                 -- session/event id; deduped for idempotency
-    created_at    TEXT NOT NULL
+    provider      TEXT,                        -- mock | stripe | revenuecat | signup | app
+    provider_ref  TEXT,                        -- session/event id; deduped for idempotency
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 `);
-// A provider_ref may only be fulfilled once — the unique index makes double
-// webhook deliveries (or a retried mock purchase) a no-op insert.
-db.exec(
+
+// A provider_ref may only be fulfilled once — the partial unique index makes a
+// duplicate webhook delivery (or retried purchase) a no-op insert.
+await pool.query(
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_provider_ref ON transactions(provider_ref) WHERE provider_ref IS NOT NULL',
 );
 
-export function createUser(email, passwordHash) {
-  const info = db
-    .prepare('INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, ?)')
-    .run(email, passwordHash, new Date().toISOString());
-  return { id: Number(info.lastInsertRowid), email };
+// ─────────────────────────────────────────────────────────────── users ──
+
+export async function createUser(email, passwordHash) {
+  const { rows } = await pool.query(
+    'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
+    [email, passwordHash],
+  );
+  return { id: rows[0].id, email: rows[0].email };
 }
 
-export function findUserByEmail(email) {
-  return db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+export async function findUserByEmail(email) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+  return rows[0]; // undefined when none
 }
 
-export function findUserById(id) {
-  return db
-    .prepare('SELECT id, email, created_at FROM users WHERE id = ?')
-    .get(id);
+export async function findUserById(id) {
+  const { rows } = await pool.query(
+    'SELECT id, email, created_at FROM users WHERE id = $1',
+    [id],
+  );
+  return rows[0];
 }
 
-export function linkGoogle(id, sub) {
-  db.prepare('UPDATE users SET google_sub = ? WHERE id = ?').run(sub, id);
+export async function linkGoogle(id, sub) {
+  await pool.query('UPDATE users SET google_sub = $1 WHERE id = $2', [sub, id]);
 }
 
-// ──────────────────────────────────────────────────────────────── billing ──
+// ─────────────────────────────────────────────────────────────── billing ──
 
-const now = () => new Date().toISOString();
-
-// node:sqlite's DatabaseSync has no .transaction() helper (unlike better-sqlite3),
-// so wrap a unit of work in an explicit BEGIN/COMMIT, rolling back on throw.
-function inTx(fn) {
-  db.exec('BEGIN');
+// Runs a unit of work on a single pooled connection inside a transaction,
+// rolling back on throw. The callback receives that client so its queries share
+// the transaction.
+async function inTx(fn) {
+  const client = await pool.connect();
   try {
-    const result = fn();
-    db.exec('COMMIT');
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
     return result;
   } catch (err) {
-    db.exec('ROLLBACK');
+    await client.query('ROLLBACK');
     throw err;
+  } finally {
+    client.release();
   }
 }
 
 /// Current credits + subscription for a user. `subscriptionActive` is the only
-/// flag callers should gate on (it accounts for expiry).
-export function getEntitlements(userId) {
-  const row = db
-    .prepare('SELECT credits, sub_status, sub_expires_at FROM users WHERE id = ?')
-    .get(userId);
+/// flag callers should gate on (it accounts for expiry). Pass [exec] (a tx
+/// client) to read inside an open transaction; defaults to the pool.
+export async function getEntitlements(userId, exec = pool) {
+  const { rows } = await exec.query(
+    'SELECT credits, sub_status, sub_expires_at FROM users WHERE id = $1',
+    [userId],
+  );
+  const row = rows[0];
   if (!row) return { credits: 0, subStatus: null, subExpiresAt: null, subscriptionActive: false };
-  const active =
-    row.sub_status === 'active' &&
-    !!row.sub_expires_at &&
-    new Date(row.sub_expires_at).getTime() > Date.now();
+  const expiresMs = row.sub_expires_at ? new Date(row.sub_expires_at).getTime() : 0;
+  const active = row.sub_status === 'active' && expiresMs > Date.now();
   return {
     credits: row.credits ?? 0,
     subStatus: row.sub_status ?? null,
@@ -106,15 +126,17 @@ export function getEntitlements(userId) {
   };
 }
 
-// Records a ledger row. Returns false if provider_ref was already used (the
-// unique index rejects the duplicate) — the caller treats that as "already done".
-function ledger(tx) {
-  try {
-    db.prepare(
-      `INSERT INTO transactions
-         (user_id, kind, credits_delta, amount_cents, currency, product_id, provider, provider_ref, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
+// Records a ledger row on [client]. Returns false if provider_ref was already
+// used (ON CONFLICT DO NOTHING skips the insert) — the caller treats that as
+// "already fulfilled". Using ON CONFLICT (not a caught exception) keeps the
+// surrounding transaction alive, which Postgres would otherwise abort.
+async function ledger(client, tx) {
+  const res = await client.query(
+    `INSERT INTO transactions
+       (user_id, kind, credits_delta, amount_cents, currency, product_id, provider, provider_ref)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (provider_ref) WHERE provider_ref IS NOT NULL DO NOTHING`,
+    [
       tx.userId,
       tx.kind,
       tx.creditsDelta ?? 0,
@@ -123,58 +145,62 @@ function ledger(tx) {
       tx.productId ?? null,
       tx.provider ?? null,
       tx.providerRef ?? null,
-      now(),
+    ],
+  );
+  return res.rowCount > 0;
+}
+
+/// Adds [n] credits and writes a ledger row, atomically. When [providerRef] was
+/// already recorded, this is a no-op and returns the unchanged balance
+/// (idempotent fulfilment for webhooks / retried purchases).
+export async function addCredits(userId, n, meta = {}) {
+  return inTx(async (client) => {
+    const recorded = await ledger(client, {
+      userId,
+      kind: meta.kind || 'purchase',
+      creditsDelta: n,
+      ...meta,
+    });
+    if (!recorded) return { applied: false, ...(await getEntitlements(userId, client)) };
+    await client.query('UPDATE users SET credits = credits + $1 WHERE id = $2', [n, userId]);
+    return { applied: true, ...(await getEntitlements(userId, client)) };
+  });
+}
+
+/// Atomically spends [n] credits if the balance allows. Returns { ok, credits }.
+/// ok=false means insufficient balance (nothing changed). The row is locked
+/// FOR UPDATE so concurrent spends can't double-spend.
+export async function spendCredits(userId, n = 1, meta = {}) {
+  return inTx(async (client) => {
+    const { rows } = await client.query(
+      'SELECT credits FROM users WHERE id = $1 FOR UPDATE',
+      [userId],
     );
-    return true;
-  } catch (err) {
-    if (String(err?.message || '').includes('UNIQUE')) return false; // already fulfilled
-    throw err;
-  }
-}
-
-/// Adds [n] credits and writes a ledger row, atomically. When [providerRef] is
-/// supplied and was already recorded, this is a no-op and returns the unchanged
-/// balance (idempotent fulfilment for webhooks / retried purchases).
-export function addCredits(userId, n, meta = {}) {
-  return inTx(() => {
-    const recorded = ledger({ userId, kind: meta.kind || 'purchase', creditsDelta: n, ...meta });
-    if (!recorded) return { applied: false, ...getEntitlements(userId) };
-    db.prepare('UPDATE users SET credits = credits + ? WHERE id = ?').run(n, userId);
-    return { applied: true, ...getEntitlements(userId) };
+    const credits = rows[0]?.credits ?? 0;
+    if (!rows[0] || credits < n) return { ok: false, credits };
+    await client.query('UPDATE users SET credits = credits - $1 WHERE id = $2', [n, userId]);
+    await ledger(client, { userId, kind: 'spend', creditsDelta: -n, ...meta });
+    return { ok: true, credits: credits - n };
   });
 }
 
-/// Atomically spends [n] credits if the balance allows. Returns
-/// { ok, credits }. ok=false means insufficient balance (nothing changed).
-export function spendCredits(userId, n = 1, meta = {}) {
-  return inTx(() => {
-    const row = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
-    if (!row || (row.credits ?? 0) < n) return { ok: false, credits: row?.credits ?? 0 };
-    db.prepare('UPDATE users SET credits = credits - ? WHERE id = ?').run(n, userId);
-    ledger({ userId, kind: 'spend', creditsDelta: -n, ...meta });
-    return { ok: true, credits: (row.credits ?? 0) - n };
-  });
-}
-
-/// Activates/extends a subscription until [expiresAt] (ISO string). Idempotent
-/// on [providerRef]. If already active and not expired, the new period is added
-/// on top of the remaining time so renewals don't lose days.
-export function activateSubscription(userId, periodMs, meta = {}) {
-  return inTx(() => {
-    const recorded = ledger({ userId, kind: 'subscription', ...meta });
-    if (!recorded) return { applied: false, ...getEntitlements(userId) };
-    const ent = getEntitlements(userId);
-    const base = ent.subscriptionActive
-      ? new Date(ent.subExpiresAt).getTime()
-      : Date.now();
+/// Activates/extends a subscription by [periodMs]. Idempotent on [providerRef].
+/// If already active, the new period stacks on the remaining time so renewals
+/// don't lose days.
+export async function activateSubscription(userId, periodMs, meta = {}) {
+  return inTx(async (client) => {
+    const recorded = await ledger(client, { userId, kind: 'subscription', ...meta });
+    if (!recorded) return { applied: false, ...(await getEntitlements(userId, client)) };
+    const ent = await getEntitlements(userId, client);
+    const base = ent.subscriptionActive ? new Date(ent.subExpiresAt).getTime() : Date.now();
     const expires = new Date(base + periodMs).toISOString();
-    db.prepare('UPDATE users SET sub_status = ?, sub_expires_at = ? WHERE id = ?').run(
+    await client.query('UPDATE users SET sub_status = $1, sub_expires_at = $2 WHERE id = $3', [
       'active',
       expires,
       userId,
-    );
-    return { applied: true, ...getEntitlements(userId) };
+    ]);
+    return { applied: true, ...(await getEntitlements(userId, client)) };
   });
 }
 
-export default db;
+export default pool;

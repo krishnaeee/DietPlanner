@@ -103,10 +103,10 @@ app.post('/api/plan', requireAuth, async (req, res) => {
   // ── Entitlement gate: an active subscription generates free; otherwise we
   // spend one credit up front (refunded below if generation fails). No
   // entitlement → 402 so the app can show the paywall.
-  const ent = getEntitlements(req.user.id);
+  const ent = await getEntitlements(req.user.id);
   let creditSpent = false;
   if (!ent.subscriptionActive) {
-    const spend = spendCredits(req.user.id, 1, { provider: 'app', productId: 'plan' });
+    const spend = await spendCredits(req.user.id, 1, { provider: 'app', productId: 'plan' });
     if (!spend.ok) {
       console.log(`[plan] ✗ payment required for ${req.user.email} (credits=${spend.credits})`);
       return res.status(402).json({
@@ -121,7 +121,7 @@ app.post('/api/plan', requireAuth, async (req, res) => {
   try {
     const result = await generatePlan(value);
     const secs = ((Date.now() - started) / 1000).toFixed(1);
-    const after = getEntitlements(req.user.id);
+    const after = await getEntitlements(req.user.id);
     console.log(`[plan] → responded 200 in ${secs}s (${result.plan?.days?.length ?? 0} days) · credits=${after.credits}`);
     res.json({
       ...result,
@@ -135,7 +135,7 @@ app.post('/api/plan', requireAuth, async (req, res) => {
     // Generation failed after we charged — give the credit back so the user
     // isn't billed for nothing.
     if (creditSpent) {
-      addCredits(req.user.id, 1, { kind: 'refund', provider: 'app', productId: 'plan', amountCents: 0, currency: CURRENCY });
+      await addCredits(req.user.id, 1, { kind: 'refund', provider: 'app', productId: 'plan', amountCents: 0, currency: CURRENCY });
       console.log(`[plan] refunded 1 credit to ${req.user.email} after failure`);
     }
     const secs = ((Date.now() - started) / 1000).toFixed(1);

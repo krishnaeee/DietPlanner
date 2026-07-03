@@ -10,9 +10,9 @@ import { SIGNUP_FREE_CREDITS } from './billing.js';
 
 /// Grants the free starter credits to a freshly created account (recorded in
 /// the ledger as a 'grant' so the balance has an audit trail).
-function grantSignupCredits(userId) {
+async function grantSignupCredits(userId) {
   if (SIGNUP_FREE_CREDITS > 0) {
-    addCredits(userId, SIGNUP_FREE_CREDITS, { kind: 'grant', provider: 'signup' });
+    await addCredits(userId, SIGNUP_FREE_CREDITS, { kind: 'grant', provider: 'signup' });
   }
 }
 
@@ -54,13 +54,13 @@ authRouter.post('/signup', async (req, res) => {
   if (password.length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
   }
-  if (findUserByEmail(email)) {
+  if (await findUserByEmail(email)) {
     return res.status(409).json({ error: 'An account with this email already exists.' });
   }
 
   const hash = await bcrypt.hash(password, 10);
-  const user = createUser(email, hash);
-  grantSignupCredits(user.id);
+  const user = await createUser(email, hash);
+  await grantSignupCredits(user.id);
   console.log(`[auth] signup: ${email} (id ${user.id}) +${SIGNUP_FREE_CREDITS} free credits`);
   return res
     .status(201)
@@ -73,7 +73,7 @@ authRouter.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 
-  const row = findUserByEmail(email);
+  const row = await findUserByEmail(email);
   // Always run a compare to avoid leaking whether the email exists via timing.
   const ok = row ? await bcrypt.compare(password, row.password_hash) : false;
   if (!row || !ok) {
@@ -125,14 +125,14 @@ authRouter.post('/google', async (req, res) => {
   const sub = payload?.sub || '';
   if (!email) return res.status(401).json({ error: 'Your Google account has no email.' });
 
-  let user = findUserByEmail(email);
+  let user = await findUserByEmail(email);
   if (!user) {
     // No local password for Google accounts — store an unusable random hash.
     const hash = await bcrypt.hash(randomBytes(24).toString('hex'), 10);
-    user = createUser(email, hash);
-    grantSignupCredits(user.id);
+    user = await createUser(email, hash);
+    await grantSignupCredits(user.id);
   }
-  linkGoogle(user.id, sub);
+  await linkGoogle(user.id, sub);
   console.log(`[auth] google login: ${email} (id ${user.id})`);
   return res.json({
     token: signToken({ id: user.id, email: user.email }),
@@ -141,8 +141,8 @@ authRouter.post('/google', async (req, res) => {
 });
 
 // Returns the current user — used by the app to verify a stored token on launch.
-authRouter.get('/me', requireAuth, (req, res) => {
-  const user = findUserById(req.user.id);
+authRouter.get('/me', requireAuth, async (req, res) => {
+  const user = await findUserById(req.user.id);
   if (!user) return res.status(401).json({ error: 'Account not found.' });
   return res.json({ user: { id: user.id, email: user.email } });
 });

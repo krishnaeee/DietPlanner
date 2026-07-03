@@ -20,8 +20,8 @@ import {
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
 /// Client-facing entitlements shape (what the Flutter app renders).
-function entitlementsDto(userId) {
-  const e = getEntitlements(userId);
+async function entitlementsDto(userId) {
+  const e = await getEntitlements(userId);
   return {
     credits: e.credits,
     subscriptionActive: e.subscriptionActive,
@@ -31,7 +31,7 @@ function entitlementsDto(userId) {
 
 /// Applies a paid product to an account. Idempotent on [providerRef]. Used by
 /// both the mock checkout and the Stripe webhook so fulfilment lives in one place.
-function fulfill({ userId, product, provider, providerRef }) {
+async function fulfill({ userId, product, provider, providerRef }) {
   const meta = {
     provider,
     providerRef,
@@ -48,8 +48,8 @@ function fulfill({ userId, product, provider, providerRef }) {
 export const billingRouter = express.Router();
 
 // Current balance + the catalog to render the paywall.
-billingRouter.get('/me', requireAuth, (req, res) => {
-  res.json({ entitlements: entitlementsDto(req.user.id), ...publicCatalog() });
+billingRouter.get('/me', requireAuth, async (req, res) => {
+  res.json({ entitlements: await entitlementsDto(req.user.id), ...publicCatalog() });
 });
 
 // Start a purchase. In mock mode we fulfil immediately and return the new
@@ -67,24 +67,25 @@ billingRouter.post('/checkout', requireAuth, async (req, res) => {
   if (!product) return res.status(400).json({ error: 'Unknown product.' });
 
   if (BILLING_PROVIDER === 'mock') {
-    const result = fulfill({
+    const result = await fulfill({
       userId: req.user.id,
       product,
       provider: 'mock',
       providerRef: `mock_${randomUUID()}`,
     });
-    console.log(`[billing] mock purchase ${product.id} by ${req.user.email} → ${JSON.stringify(entitlementsDto(req.user.id))}`);
+    const dto = await entitlementsDto(req.user.id);
+    console.log(`[billing] mock purchase ${product.id} by ${req.user.email} → ${JSON.stringify(dto)}`);
     return res.json({
       provider: 'mock',
       completed: true,
       applied: result.applied,
-      entitlements: entitlementsDto(req.user.id),
+      entitlements: dto,
     });
   }
 
   // Stripe: create a hosted Checkout session.
   try {
-    const user = findUserById(req.user.id);
+    const user = await findUserById(req.user.id);
     const base = PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
     const { url, ref } = await createStripeCheckout({
       user,
@@ -117,7 +118,7 @@ export async function stripeWebhookHandler(req, res) {
     const userId = Number(session.metadata?.userId || session.client_reference_id);
     const product = getProduct(session.metadata?.productId);
     if (userId && product) {
-      fulfill({ userId, product, provider: 'stripe', providerRef: session.id });
+      await fulfill({ userId, product, provider: 'stripe', providerRef: session.id });
       console.log(`[billing] fulfilled ${product.id} for user ${userId} (stripe ${session.id})`);
     } else {
       console.warn('[billing] webhook missing userId/product metadata — ignored');
@@ -130,7 +131,7 @@ export async function stripeWebhookHandler(req, res) {
 // Authorization header in the RevenueCat dashboard. RevenueCat validates the
 // App Store / Play receipt, then calls this so we grant credits / activate the
 // subscription. Idempotent on the event id.
-billingRouter.post('/revenuecat/webhook', (req, res) => {
+billingRouter.post('/revenuecat/webhook', async (req, res) => {
   if (!RC_WEBHOOK_AUTH || req.headers.authorization !== RC_WEBHOOK_AUTH) {
     return res.status(401).json({ error: 'Unauthorized webhook.' });
   }
@@ -157,7 +158,7 @@ billingRouter.post('/revenuecat/webhook', (req, res) => {
     return res.json({ ignored: 'no-mapping' });
   }
 
-  const result = fulfill({
+  const result = await fulfill({
     userId,
     product,
     provider: 'revenuecat',
