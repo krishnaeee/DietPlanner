@@ -44,6 +44,10 @@ class PlanScreen extends StatefulWidget {
   final int? initialDay;
   final int? highlightMeal;
 
+  /// When shown as a tab inside PlanHub, drop the redundant "Progress" header
+  /// action (Progress is its own tab).
+  final bool embedded;
+
   const PlanScreen({
     super.key,
     this.requestBody,
@@ -52,6 +56,7 @@ class PlanScreen extends StatefulWidget {
     this.stored,
     this.initialDay,
     this.highlightMeal,
+    this.embedded = false,
   });
 
   @override
@@ -175,6 +180,7 @@ class _PlanScreenState extends State<PlanScreen> {
             stored: _current!,
             initialDay: widget.initialDay,
             highlightMeal: widget.highlightMeal,
+            embedded: widget.embedded,
             // Freshly generated (not opened from the saved list) → offer reminders.
             justGenerated: widget.requestBody != null,
           );
@@ -432,6 +438,7 @@ class _PlanView extends StatefulWidget {
   final int? initialDay;
   final int? highlightMeal;
   final bool justGenerated;
+  final bool embedded;
   const _PlanView({
     required this.plan,
     required this.location,
@@ -439,6 +446,7 @@ class _PlanView extends StatefulWidget {
     this.initialDay,
     this.highlightMeal,
     this.justGenerated = false,
+    this.embedded = false,
   });
 
   @override
@@ -646,11 +654,12 @@ class _PlanViewState extends State<_PlanView> {
           subtitle: sub,
           showBack: true,
           actions: [
-            _HeaderAction(
-              icon: Icons.insights_rounded,
-              label: 'Progress',
-              onTap: _openProgress,
-            ),
+            if (!widget.embedded)
+              _HeaderAction(
+                icon: Icons.insights_rounded,
+                label: 'Progress',
+                onTap: _openProgress,
+              ),
             _HeaderIconButton(
               icon: Icons.tune_rounded,
               tooltip: 'Diet settings',

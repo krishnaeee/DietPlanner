@@ -9,7 +9,8 @@ import '../theme/app_theme.dart';
 import '../widgets/fresh.dart';
 import 'add_plan_screen.dart';
 import 'paywall_screen.dart';
-import 'plan_screen.dart';
+import 'plan_hub.dart';
+import 'settings_screen.dart';
 
 /// The home: a list of the account's saved plans plus an "add" button that opens
 /// the plan-generation flow. Plan generation itself lives in [AddPlanScreen].
@@ -77,8 +78,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openPlan(StoredPlan p) {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PlanScreen(stored: p, location: p.location),
+      builder: (_) => PlanHub(stored: p),
     ));
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
   }
 
   Future<void> _renamePlan(StoredPlan p) async {
@@ -149,7 +156,10 @@ class _HomeScreenState extends State<HomeScreen> {
             subtitle: _plans.isEmpty
                 ? null
                 : '${_plans.length} plan${_plans.length == 1 ? '' : 's'}',
-            actions: [_CreditChip(onTap: _openPaywall)],
+            actions: [
+              _CreditChip(onTap: _openPaywall),
+              _SettingsBtn(onTap: _openSettings),
+            ],
           ),
           Expanded(
             child: _loading
@@ -278,6 +288,28 @@ class _CreditChip extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Circular settings/profile button in the Plans header.
+class _SettingsBtn extends StatelessWidget {
+  final VoidCallback onTap;
+  const _SettingsBtn({required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      shape: CircleBorder(side: BorderSide(color: AppColors.line)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(Icons.person_rounded, size: 20, color: AppColors.inkMuted),
+        ),
+      ),
     );
   }
 }

@@ -1,66 +1,38 @@
 import 'package:flutter/material.dart';
 
-import '../services/active_plan.dart';
 import '../services/plan_storage.dart';
 import '../theme/app_theme.dart';
-import 'home_screen.dart';
+import 'plan_screen.dart';
 import 'progress_screen.dart';
-import 'settings_screen.dart';
 import 'today_screen.dart';
 
-/// The app shell: a persistent bottom tab bar hosting Today, Plans, Progress and
-/// Profile. Replaces the old push-into-a-list navigation.
-class MainScaffold extends StatefulWidget {
-  const MainScaffold({super.key});
+/// A single plan opened from the Plans list: its own bottom tabs for Today, the
+/// day-by-day Plan, and Progress. Back (in any tab's header) returns to Plans.
+class PlanHub extends StatefulWidget {
+  final StoredPlan stored;
+  const PlanHub({super.key, required this.stored});
 
   @override
-  State<MainScaffold> createState() => _MainScaffoldState();
+  State<PlanHub> createState() => _PlanHubState();
 }
 
-class _MainScaffoldState extends State<MainScaffold> {
+class _PlanHubState extends State<PlanHub> {
   int _index = 0;
-  StoredPlan? _active; // newest plan, for the Progress tab
-
-  @override
-  void initState() {
-    super.initState();
-    _loadActive();
-    PlanStorage.revision.addListener(_loadActive);
-    ActivePlan.id.addListener(_loadActive);
-  }
-
-  @override
-  void dispose() {
-    PlanStorage.revision.removeListener(_loadActive);
-    ActivePlan.id.removeListener(_loadActive);
-    super.dispose();
-  }
-
-  Future<void> _loadActive() async {
-    final all = await PlanStorage.loadAll();
-    if (!mounted) return;
-    setState(() => _active = ActivePlan.resolve(all));
-  }
 
   @override
   Widget build(BuildContext context) {
-    final tabs = [
-      const TodayScreen(),
-      const HomeScreen(), // "Plans" list
-      _active == null
-          ? const _NeedsPlan(label: 'Create a plan to track your progress.')
-          : ProgressScreen(
-              key: ValueKey('progress-${_active!.id}'),
-              stored: _active!,
-              embedded: true,
-            ),
-      const SettingsScreen(embedded: true),
-    ];
-
+    final sp = widget.stored;
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: IndexedStack(index: _index, children: tabs),
-      bottomNavigationBar: _TabBar(
+      body: IndexedStack(
+        index: _index,
+        children: [
+          TodayScreen(plan: sp),
+          PlanScreen(stored: sp, location: sp.location, embedded: true),
+          ProgressScreen(stored: sp),
+        ],
+      ),
+      bottomNavigationBar: _HubNav(
         index: _index,
         onTap: (i) => setState(() => _index = i),
       ),
@@ -68,43 +40,15 @@ class _MainScaffoldState extends State<MainScaffold> {
   }
 }
 
-class _NeedsPlan extends StatelessWidget {
-  final String label;
-  const _NeedsPlan({required this.label});
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return SafeArea(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.insights_rounded,
-                  size: 48, color: AppColors.brand.withValues(alpha: 0.6)),
-              const SizedBox(height: 14),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: text.bodyLarge?.copyWith(color: AppColors.inkMuted)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TabBar extends StatelessWidget {
+class _HubNav extends StatelessWidget {
   final int index;
   final ValueChanged<int> onTap;
-  const _TabBar({required this.index, required this.onTap});
+  const _HubNav({required this.index, required this.onTap});
 
   static const _items = [
     (icon: Icons.today_rounded, label: 'Today'),
-    (icon: Icons.restaurant_menu_rounded, label: 'Plans'),
+    (icon: Icons.restaurant_menu_rounded, label: 'Plan'),
     (icon: Icons.insights_rounded, label: 'Progress'),
-    (icon: Icons.person_rounded, label: 'Profile'),
   ];
 
   @override
@@ -129,7 +73,7 @@ class _TabBar extends StatelessWidget {
             children: [
               for (var i = 0; i < _items.length; i++)
                 Expanded(
-                  child: _TabItem(
+                  child: _HubTab(
                     icon: _items[i].icon,
                     label: _items[i].label,
                     selected: i == index,
@@ -144,12 +88,12 @@ class _TabBar extends StatelessWidget {
   }
 }
 
-class _TabItem extends StatelessWidget {
+class _HubTab extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  const _TabItem({
+  const _HubTab({
     required this.icon,
     required this.label,
     required this.selected,

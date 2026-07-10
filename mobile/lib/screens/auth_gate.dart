@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../theme/app_theme.dart';
+import 'home_screen.dart';
 import 'login_screen.dart';
-import 'main_scaffold.dart';
 
 /// Decides the first screen: a brief splash while the saved session is checked,
 /// then the home screen (logged in) or the login screen. Rebuilds reactively
@@ -47,7 +47,7 @@ class _AuthGateState extends State<AuthGate> {
     return ValueListenableBuilder<bool>(
       valueListenable: AuthService.instance.authState,
       builder: (_, loggedIn, _) =>
-          loggedIn ? const MainScaffold() : const LoginScreen(),
+          loggedIn ? const HomeScreen() : const LoginScreen(),
     );
   }
 }
