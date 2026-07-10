@@ -32,20 +32,21 @@ class FreshHeader extends StatelessWidget {
       bottom: false,
       // Gap between the OS status bar and the app's top bar.
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        padding: const EdgeInsets.only(top: 8),
         child: Container(
+          // Full-width band, flush to the sides, with a soft rounded bottom.
           decoration: BoxDecoration(
             gradient: AppColors.ctaGradient, // the brand theme colour
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
             boxShadow: [
               BoxShadow(
-                color: AppColors.brand.withValues(alpha: 0.28),
+                color: AppColors.brand.withValues(alpha: 0.24),
                 blurRadius: 16,
                 offset: const Offset(0, 6),
               ),
             ],
           ),
-          padding: EdgeInsets.fromLTRB(showBack ? 10 : 18, 10, 12, 10),
+          padding: EdgeInsets.fromLTRB(showBack ? 12 : 18, 12, 14, 14),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
