@@ -464,6 +464,7 @@ class _ScopeToggle extends StatelessWidget {
         border: Border.all(color: AppColors.line),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _seg('This day', !wholeWeek, () => onChanged(false)),
           _seg('$weekCount days', wholeWeek, () => onChanged(true)),

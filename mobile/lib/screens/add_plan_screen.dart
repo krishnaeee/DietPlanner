@@ -673,6 +673,7 @@ class _PillToggle<T> extends StatelessWidget {
         border: Border.all(color: AppColors.line),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: options.map((o) {
           final sel = o.value == selected;
           return Expanded(
