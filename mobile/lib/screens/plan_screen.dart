@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/diet_plan.dart';
 import '../models/tracking.dart';
@@ -175,6 +174,8 @@ class _PlanScreenState extends State<PlanScreen> {
             stored: _current!,
             initialDay: widget.initialDay,
             highlightMeal: widget.highlightMeal,
+            // Freshly generated (not opened from the saved list) → offer reminders.
+            justGenerated: widget.requestBody != null,
           );
         },
       ),
@@ -429,12 +430,14 @@ class _PlanView extends StatefulWidget {
   final StoredPlan stored;
   final int? initialDay;
   final int? highlightMeal;
+  final bool justGenerated;
   const _PlanView({
     required this.plan,
     required this.location,
     required this.stored,
     this.initialDay,
     this.highlightMeal,
+    this.justGenerated = false,
   });
 
   @override
@@ -448,7 +451,6 @@ class _PlanViewState extends State<_PlanView> {
   late DietPlan _plan; // grows as the user loads more weeks
   bool _extending = false; // a "load next week" generation is in flight
   int? _swapping; // meal index (on the selected day) currently being swapped
-  bool _reminderPromptDismissed = false; // hides the "set reminders" nudge
   PlanTracking _tracking = PlanTracking();
 
   final ScrollController _scroll = ScrollController();
@@ -495,7 +497,7 @@ class _PlanViewState extends State<_PlanView> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _revealHighlighted());
     }
     _loadTracking();
-    _loadPromptDismissed();
+    _maybeShowReminderPrompt();
   }
 
   Future<void> _loadTracking() async {
@@ -503,26 +505,20 @@ class _PlanViewState extends State<_PlanView> {
     if (mounted) setState(() => _tracking = t);
   }
 
-  static const _promptDismissKey = 'reminder_prompt_dismissed';
-
-  /// Restores whether this plan's "set reminders" nudge was dismissed before.
-  Future<void> _loadPromptDismissed() async {
-    final prefs = await SharedPreferences.getInstance();
-    final ids = prefs.getStringList(_promptDismissKey) ?? const [];
-    if (ids.contains(_sp.id) && mounted) {
-      setState(() => _reminderPromptDismissed = true);
-    }
-  }
-
-  /// Hides the nudge and remembers it per-plan so it doesn't return on reopen.
-  Future<void> _dismissReminderPrompt() async {
-    setState(() => _reminderPromptDismissed = true);
-    final prefs = await SharedPreferences.getInstance();
-    final ids = prefs.getStringList(_promptDismissKey) ?? <String>[];
-    if (!ids.contains(_sp.id)) {
-      ids.add(_sp.id);
-      await prefs.setStringList(_promptDismissKey, ids);
-    }
+  /// Right after a plan is generated, offer to set reminders via a centered
+  /// dialog (only for freshly generated plans that don't already have them,
+  /// and only when the app-level master switch is on).
+  void _maybeShowReminderPrompt() {
+    if (!widget.justGenerated || _scheduled) return;
+    if (!NotificationService.instance.remindersEnabled.value) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final set = await showDialog<bool>(
+        context: context,
+        builder: (_) => const _ReminderPromptDialog(),
+      );
+      if (set == true && mounted) _openSettings();
+    });
   }
 
   Future<void> _toggleMeal(int dayIndex, int mealIndex) async {
@@ -733,13 +729,6 @@ class _PlanViewState extends State<_PlanView> {
                 ),
                 const SizedBox(height: 20),
                 _extendSection(plan, text),
-                if (!_scheduled && !_reminderPromptDismissed) ...[
-                  const SizedBox(height: 16),
-                  _ReminderPromptCard(
-                    onSet: _openSettings,
-                    onDismiss: _dismissReminderPrompt,
-                  ),
-                ],
               ] else
                 Padding(
                   padding: const EdgeInsets.only(top: 40),
@@ -1182,78 +1171,89 @@ class _DayGroceryLink extends StatelessWidget {
   }
 }
 
-/// A dismissible nudge shown at the bottom of a plan when reminders aren't set.
-class _ReminderPromptCard extends StatelessWidget {
-  final VoidCallback onSet;
-  final VoidCallback onDismiss;
-  const _ReminderPromptCard({required this.onSet, required this.onDismiss});
+/// Centered popup shown once, right after a plan is generated, offering to set
+/// reminders. Explains what they do and that they can be turned off later.
+/// Pops `true` if the user chose to set them.
+class _ReminderPromptDialog extends StatelessWidget {
+  const _ReminderPromptDialog();
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: AppColors.brand.withValues(alpha: 0.4)),
-        boxShadow: softShadow(opacity: 0.05, blur: 14, y: 6),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.card)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 24, 22, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 72,
+                height: 72,
                 decoration: BoxDecoration(
                   color: AppColors.brand.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
+                  shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.notifications_active_rounded,
-                    color: AppColors.brand),
+                    color: AppColors.brand, size: 36),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Get daily reminders?',
-                        style: text.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 2),
-                    Text(
-                      'A grocery alert the evening before + meal-time alarms.',
-                      style:
-                          text.bodySmall?.copyWith(color: AppColors.inkMuted),
-                    ),
-                  ],
-                ),
+            ),
+            const SizedBox(height: 18),
+            Center(
+              child: Text('Stay on track with reminders?',
+                  textAlign: TextAlign.center,
+                  style: text.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(height: 12),
+            _bullet(context, Icons.shopping_cart_rounded,
+                'A grocery alert at 7 PM the evening before each day, so you can shop ahead.'),
+            const SizedBox(height: 10),
+            _bullet(context, Icons.restaurant_rounded,
+                'A gentle alarm at each meal time so you never miss one.'),
+            const SizedBox(height: 16),
+            Text(
+              'You can change or turn these off anytime in the plan\'s Diet settings.',
+              style: text.bodySmall?.copyWith(color: AppColors.inkMuted, height: 1.4),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(true),
+                icon: const Icon(Icons.notifications_active_rounded, size: 18),
+                label: const Text('Set reminders'),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: onSet,
-                  icon: const Icon(Icons.notifications_active_rounded, size: 18),
-                  label: const Text('Set reminders'),
-                ),
+            ),
+            const SizedBox(height: 4),
+            Center(
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Maybe later'),
               ),
-              const SizedBox(width: 10),
-              TextButton(onPressed: onDismiss, child: const Text('Not now')),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'You can turn this off anytime in Diet settings.',
-            style: text.bodySmall?.copyWith(color: AppColors.inkFaint),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _bullet(BuildContext context, IconData icon, String label) {
+    final text = Theme.of(context).textTheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: AppColors.brand),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(label,
+              style: text.bodyMedium?.copyWith(color: AppColors.ink, height: 1.4)),
+        ),
+      ],
     );
   }
 }

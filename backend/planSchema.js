@@ -56,7 +56,7 @@ export const PLAN_SCHEMA = {
     summary: {
       type: 'string',
       description:
-        "2-4 sentence overview: the safe rate of weight change, the daily calorie target, and the regional cuisine the plan draws on. If the user's target is not safely achievable in the period, say so here and explain the adjusted, safe target you planned for instead.",
+        "2-4 sentence overview: the plan's approach, the daily calorie target, and the regional cuisine it draws on. For a weight-loss or weight-gain goal, mention the safe rate of change and, if the target is not safely achievable in the period, say so and explain the adjusted, safe target you planned instead. For an 'eat healthy'/maintenance plan, describe the balanced, weight-stable approach (do not talk about weight change or a target).",
     },
     dailyCalorieTarget: {
       type: 'integer',
@@ -109,6 +109,7 @@ export function buildPrompt(input, plannedDays) {
     sex,
     activityLevel,
     dietaryPreference,
+    goal,
     startDay = 1,
     avoidDishes = [],
   } = input;
@@ -133,7 +134,10 @@ export function buildPrompt(input, plannedDays) {
     .filter(Boolean)
     .join('\n');
 
-  const direction = targetWeightKg < weightKg ? 'lose' : targetWeightKg > weightKg ? 'gain' : 'maintain';
+  // Prefer the explicit goal; fall back to inferring from the weights.
+  const resolvedGoal =
+    goal || (targetWeightKg < weightKg ? 'lose' : targetWeightKg > weightKg ? 'gain' : 'maintain');
+  const isMaintain = resolvedGoal === 'maintain';
 
   const continuationContext = isContinuation
     ? `\nThis is a CONTINUATION of an ongoing ${targetDays}-day plan. You are filling days ${startDay} to ${endDay}. Keep the same daily calorie target and style as the rest of the plan.`
@@ -143,11 +147,20 @@ export function buildPrompt(input, plannedDays) {
     ? `\n- Do NOT reuse any of these dishes already planned earlier — pick different meals: ${avoidDishes.join(', ')}.`
     : '';
 
+  // The goal line + calorie instruction differ for "eat healthy" (maintain) vs
+  // a weight-change goal.
+  const goalLine = isMaintain
+    ? `Goal: eat healthy and MAINTAIN a stable weight (currently ${weightKg} kg).`
+    : `Current weight: ${weightKg} kg\nTarget weight: ${targetWeightKg} kg (goal: ${resolvedGoal} weight)`;
+
+  const calorieLine = isMaintain
+    ? `- Choose a MAINTENANCE daily calorie target (roughly the user's TDEE for their stats and activity) so weight stays stable — do NOT create a calorie deficit or surplus. Focus on balanced, nutritious, wholesome meals.`
+    : `- Choose a daily calorie target that moves the user safely toward the target weight over the full ${targetDays}-day period. If the target is not safely achievable in that time, plan for the safe maximum instead and explain this in the summary.`;
+
   const user = `Create a personalised diet plan with these details:
 
-Current weight: ${weightKg} kg
+${goalLine}
 Height: ${heightCm} cm
-Target weight: ${targetWeightKg} kg (goal: ${direction} weight)
 Target time period: ${targetDays} days
 Location: ${location}
 ${optional ? optional + '\n' : ''}${continuationContext}
@@ -159,7 +172,7 @@ Requirements:
 - For every meal, list its ingredients with realistic shopping quantities.
 - For every meal, give realistic calories and macros (protein, carbs, fat in grams). Each day's meal calories should add up close to the daily calorie target.
 - Also provide daily protein/carbs/fat targets that are consistent with the calorie target (protein and carbs ≈ 4 kcal/g, fat ≈ 9 kcal/g) and include enough protein to support the user's goal.
-- Choose a daily calorie target that moves the user safely toward the target weight over the full ${targetDays}-day period. If the target is not safely achievable in that time, plan for the safe maximum instead and explain this in the summary.`;
+${calorieLine}`;
 
   return { system, user };
 }

@@ -26,6 +26,7 @@ app.use('/api/billing', billingRouter);
 
 const SEXES = ['male', 'female', 'other'];
 const ACTIVITY = ['sedentary', 'light', 'moderate', 'active', 'very_active'];
+const GOALS = ['lose', 'gain', 'maintain']; // 'maintain' == "eat healthy"
 
 // Validates and normalises the request body. Returns { value } or { error }.
 function validate(body) {
@@ -39,14 +40,53 @@ function validate(body) {
   const location = typeof body.location === 'string' ? body.location.trim() : '';
 
   if (!(weightKg > 0 && weightKg < 500)) errors.push('weightKg must be between 0 and 500');
-  if (!(heightCm > 0 && heightCm < 300)) errors.push('heightCm must be between 0 and 300');
-  if (!(targetWeightKg > 0 && targetWeightKg < 500))
-    errors.push('targetWeightKg must be between 0 and 500');
+  // Lower bound of 50 cm rejects a height mistakenly entered in metres (e.g. 1.7).
+  if (!(heightCm > 50 && heightCm < 300)) errors.push('heightCm must be between 50 and 300');
   if (!(targetDays >= 1 && targetDays <= 365)) errors.push('targetDays must be between 1 and 365');
   if (!location) errors.push('location is required');
 
-  // Optional fields — only validate if provided.
-  const value = { weightKg, heightCm, targetWeightKg, targetDays, location };
+  // Goal: lose | gain | maintain ("eat healthy"). An explicit goal is validated
+  // like sex/activity (unknown → error). Older clients that omit it fall back to
+  // inferring from the weights.
+  let goal;
+  if (body.goal != null && body.goal !== '') {
+    if (!GOALS.includes(body.goal)) {
+      errors.push(`goal must be one of ${GOALS.join(', ')}`);
+      goal = 'maintain'; // placeholder — the request already errored
+    } else {
+      goal = body.goal;
+    }
+  } else {
+    goal =
+      targetWeightKg > 0 && targetWeightKg < weightKg
+        ? 'lose'
+        : targetWeightKg > weightKg
+          ? 'gain'
+          : 'maintain';
+  }
+
+  // Target weight is required for lose/gain (and must be on the correct side of
+  // the current weight); for "eat healthy" (maintain) it is optional and
+  // defaults to the current weight (a balanced, weight-stable plan).
+  let effectiveTarget = targetWeightKg;
+  if (goal === 'maintain') {
+    if (!(targetWeightKg > 0 && targetWeightKg < 500)) effectiveTarget = weightKg;
+  } else if (!(targetWeightKg > 0 && targetWeightKg < 500)) {
+    errors.push('targetWeightKg must be between 0 and 500');
+  } else if (goal === 'lose' && targetWeightKg >= weightKg) {
+    errors.push('target weight must be below current weight for a lose goal');
+  } else if (goal === 'gain' && targetWeightKg <= weightKg) {
+    errors.push('target weight must be above current weight for a gain goal');
+  }
+
+  const value = {
+    weightKg,
+    heightCm,
+    targetWeightKg: effectiveTarget,
+    targetDays,
+    location,
+    goal,
+  };
 
   if (body.age != null && body.age !== '') {
     const age = Math.round(num(body.age));

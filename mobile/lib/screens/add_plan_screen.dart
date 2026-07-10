@@ -33,13 +33,17 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
   String _periodUnit = 'weeks'; // 'weeks' | 'days'
   String _sex = 'male'; // male | female | other
   String _activity = 'light'; // sedentary ... very_active
+  String _goal = 'lose'; // lose | gain | maintain ("eat healthy")
+
+  bool get _maintain => _goal == 'maintain';
 
   @override
   void initState() {
     super.initState();
-    // Refresh the live goal indicator as weights change.
+    // Refresh the live BMI / goal indicators as the body inputs change.
     _weight.addListener(_refresh);
     _targetWeight.addListener(_refresh);
+    _height.addListener(_refresh);
   }
 
   void _refresh() => setState(() {});
@@ -95,8 +99,10 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
       'weightKg': double.parse(_weight.text.trim()),
       'heightCm': double.parse(_height.text.trim()),
       'location': _location.text.trim(),
-      'targetWeightKg': double.parse(_targetWeight.text.trim()),
       'targetDays': targetDays,
+      'goal': _goal,
+      // Target weight only matters for lose/gain; "eat healthy" plans maintain.
+      if (!_maintain) 'targetWeightKg': double.parse(_targetWeight.text.trim()),
       if (_age.text.trim().isNotEmpty) 'age': int.tryParse(_age.text.trim()),
       'sex': _sex,
       'activityLevel': _activity,
@@ -115,23 +121,74 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     );
   }
 
-  ({String label, Color color, IconData icon})? get _goal {
+  /// Live BMI from the entered weight + height, with its category, a colour, and
+  /// the healthy weight range (BMI 18.5–24.9) for the height. Null until both
+  /// inputs are valid.
+  ({double bmi, String category, Color color, double lo, double hi})? get _bmi {
     final w = double.tryParse(_weight.text.trim());
-    final t = double.tryParse(_targetWeight.text.trim());
-    if (w == null || t == null || w <= 0 || t <= 0) return null;
-    final diff = w - t;
-    String fmt(double d) {
-      final s = d.toStringAsFixed(1);
-      return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
+    final h = double.tryParse(_height.text.trim());
+    // Guard against nonsense (e.g. height typed in metres) so the card doesn't
+    // render an absurd BMI. Bounds match the field validators.
+    if (w == null || h == null || w < 20 || w > 500 || h < 50 || h > 300) {
+      return null;
     }
+    final m = h / 100;
+    final bmi = w / (m * m);
+    String category;
+    Color color;
+    if (bmi < 18.5) {
+      category = 'Underweight';
+      color = AppColors.dinner;
+    } else if (bmi < 25) {
+      category = 'Normal';
+      color = AppColors.brand;
+    } else if (bmi < 30) {
+      category = 'Overweight';
+      color = AppColors.accent;
+    } else {
+      category = 'Obese';
+      color = const Color(0xFFE0573E);
+    }
+    return (bmi: bmi, category: category, color: color, lo: 18.5 * m * m, hi: 24.9 * m * m);
+  }
 
-    if (diff > 0.5) {
-      return (label: 'Lose ${fmt(diff)} kg', color: AppColors.brand, icon: Icons.trending_down_rounded);
+  /// A sensible "healthy" target weight (BMI 22) for the current height.
+  double? get _healthyTarget {
+    final h = double.tryParse(_height.text.trim());
+    if (h == null || h < 50 || h > 300) return null;
+    final m = h / 100;
+    return 22 * m * m;
+  }
+
+  /// Only offer the "use healthy target" shortcut when the healthy weight is on
+  /// the correct side of the current weight for the chosen goal — otherwise it
+  /// would fill a target that contradicts the goal.
+  bool get _healthyTargetSensible {
+    if (_maintain) return false;
+    final w = double.tryParse(_weight.text.trim());
+    final t = _healthyTarget;
+    if (w == null || t == null) return false;
+    return _goal == 'lose' ? t < w : t > w;
+  }
+
+  void _useHealthyTarget() {
+    final t = _healthyTarget;
+    if (t == null) return;
+    _targetWeight.text = t.round().toString();
+  }
+
+  /// Validates the target weight: a number in range AND on the correct side of
+  /// the current weight for the goal (below for lose, above for gain).
+  String? _validateTarget(String? v) {
+    final base = _requiredNumber(v, min: 20, max: 500);
+    if (base != null) return base;
+    final t = double.parse(v!.trim());
+    final w = double.tryParse(_weight.text.trim());
+    if (w != null) {
+      if (_goal == 'lose' && t >= w) return 'Set a weight below your current one';
+      if (_goal == 'gain' && t <= w) return 'Set a weight above your current one';
     }
-    if (diff < -0.5) {
-      return (label: 'Gain ${fmt(-diff)} kg', color: AppColors.accent, icon: Icons.trending_up_rounded);
-    }
-    return (label: 'Maintain weight', color: AppColors.dinner, icon: Icons.trending_flat_rounded);
+    return null;
   }
 
   @override
@@ -163,6 +220,36 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
                   ),
                   const SizedBox(height: 16),
                   SectionCard(
+                    title: 'What\'s your goal?',
+                    icon: Icons.flag_outlined,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _PillToggle<String>(
+                          selected: _goal,
+                          onChanged: (v) => setState(() => _goal = v),
+                          options: const [
+                            (value: 'lose', label: 'Lose', icon: Icons.trending_down_rounded),
+                            (value: 'gain', label: 'Gain', icon: Icons.trending_up_rounded),
+                            (value: 'maintain', label: 'Healthy', icon: Icons.favorite_rounded),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          _maintain
+                              ? 'A balanced plan to maintain your weight and eat well — no target needed.'
+                              : _goal == 'gain'
+                                  ? 'A higher-calorie, protein-rich plan to reach your target weight.'
+                                  : 'A safe-deficit plan to reach your target weight.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: AppColors.inkMuted,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SectionCard(
                     title: 'Your body',
                     icon: Icons.monitor_weight_outlined,
                     child: Column(
@@ -178,41 +265,50 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
                                 suffix: 'kg',
                                 icon: Icons.monitor_weight_rounded,
                                 number: true,
-                                validator: (v) => _requiredNumber(v, max: 500),
+                                validator: (v) => _requiredNumber(v, min: 20, max: 500),
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: _LabeledField(
-                                label: 'Target weight',
-                                controller: _targetWeight,
-                                suffix: 'kg',
-                                icon: Icons.flag_rounded,
+                                label: 'Height',
+                                controller: _height,
+                                suffix: 'cm',
+                                icon: Icons.straighten_rounded,
                                 number: true,
-                                validator: (v) => _requiredNumber(v, max: 500),
+                                validator: (v) => _requiredNumber(v, min: 50, max: 300),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 14),
-                        _LabeledField(
-                          label: 'Height',
-                          controller: _height,
-                          suffix: 'cm',
-                          icon: Icons.straighten_rounded,
-                          number: true,
-                          validator: (v) => _requiredNumber(v, max: 300),
-                        ),
-                        if (_goal != null) ...[
+                        // Target weight only for lose/gain — "eat healthy" maintains.
+                        if (!_maintain) ...[
+                          const SizedBox(height: 14),
+                          _LabeledField(
+                            label: 'Target weight',
+                            controller: _targetWeight,
+                            suffix: 'kg',
+                            icon: Icons.flag_rounded,
+                            number: true,
+                            autovalidate: true,
+                            validator: _validateTarget,
+                          ),
+                        ],
+                        if (_bmi != null) ...[
                           const SizedBox(height: 16),
-                          _GoalBanner(goal: _goal!),
+                          _BmiCard(
+                            bmi: _bmi!,
+                            onUseHealthy:
+                                _healthyTargetSensible ? _useHealthyTarget : null,
+                            healthyTarget: _healthyTarget,
+                          ),
                         ],
                       ],
                     ),
                   ),
                   const SizedBox(height: 16),
                   SectionCard(
-                    title: 'Your goal',
+                    title: 'Location & duration',
                     icon: Icons.route_rounded,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -403,6 +499,7 @@ class _LabeledField extends StatelessWidget {
   final IconData? icon;
   final bool number;
   final bool capitalize;
+  final bool autovalidate;
   final String? Function(String?)? validator;
 
   const _LabeledField({
@@ -413,6 +510,7 @@ class _LabeledField extends StatelessWidget {
     this.icon,
     this.number = false,
     this.capitalize = false,
+    this.autovalidate = false,
     this.validator,
   });
 
@@ -431,6 +529,8 @@ class _LabeledField extends StatelessWidget {
               : null,
           textCapitalization:
               capitalize ? TextCapitalization.words : TextCapitalization.none,
+          autovalidateMode:
+              autovalidate ? AutovalidateMode.onUserInteraction : null,
           style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
           decoration: InputDecoration(
             hintText: hint,
@@ -556,35 +656,66 @@ class _ChoicePill extends StatelessWidget {
   }
 }
 
-class _GoalBanner extends StatelessWidget {
-  final ({String label, Color color, IconData icon}) goal;
-  const _GoalBanner({required this.goal});
+/// Live BMI readout: value, category, healthy weight range, and (for a weight
+/// goal) a one-tap "use a healthy target" shortcut.
+class _BmiCard extends StatelessWidget {
+  final ({double bmi, String category, Color color, double lo, double hi}) bmi;
+  final VoidCallback? onUseHealthy;
+  final double? healthyTarget;
+  const _BmiCard({required this.bmi, this.onUseHealthy, this.healthyTarget});
+
+  String _kg(double v) {
+    final s = v.toStringAsFixed(1);
+    return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: goal.color.withValues(alpha: 0.10),
+        color: bmi.color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(goal.icon, color: goal.color, size: 20),
-          const SizedBox(width: 10),
-          Text(
-            'Goal: ',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.inkMuted,
+          Row(
+            children: [
+              Icon(Icons.monitor_heart_rounded, color: bmi.color, size: 20),
+              const SizedBox(width: 10),
+              Text('BMI ${bmi.bmi.toStringAsFixed(1)}',
+                  style: text.titleMedium?.copyWith(
+                      color: AppColors.ink, fontWeight: FontWeight.w800)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: bmi.color,
+                  borderRadius: BorderRadius.circular(30),
                 ),
+                child: Text(bmi.category,
+                    style: text.labelSmall?.copyWith(
+                        color: Colors.white, fontWeight: FontWeight.w800)),
+              ),
+            ],
           ),
-          Text(
-            goal.label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: goal.color,
-                  fontWeight: FontWeight.w800,
-                ),
-          ),
+          const SizedBox(height: 8),
+          Text('Healthy range for your height: ${_kg(bmi.lo)}–${_kg(bmi.hi)} kg',
+              style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
+          if (onUseHealthy != null && healthyTarget != null) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: onUseHealthy,
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                icon: const Icon(Icons.auto_fix_high_rounded, size: 18),
+                label: Text('Use healthy target (${_kg(healthyTarget!)} kg)'),
+              ),
+            ),
+          ],
         ],
       ),
     );
