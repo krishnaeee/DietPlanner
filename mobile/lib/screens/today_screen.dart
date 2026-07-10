@@ -185,7 +185,7 @@ class _TodayScreenState extends State<TodayScreen> {
                   const SizedBox(height: 12),
                   ...List.generate(day.meals.length, (m) {
                     return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.only(bottom: 12),
                       child: FreshMealTile(
                         meal: day.meals[m],
                         done: _tracking.isMealDone(ds.index, m),
@@ -251,13 +251,13 @@ class _CircleBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.surface,
-      shape: CircleBorder(side: BorderSide(color: AppColors.line)),
+      color: AppColors.fieldFill,
+      shape: const CircleBorder(),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-            width: 40, height: 40, child: Icon(icon, size: 20, color: AppColors.inkMuted)),
+            width: 36, height: 36, child: Icon(icon, size: 18, color: AppColors.inkMuted)),
       ),
     );
   }

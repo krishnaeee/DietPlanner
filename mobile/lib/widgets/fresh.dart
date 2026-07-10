@@ -28,37 +28,50 @@ class FreshHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            if (showBack) ...[
-              _FreshCircleBtn(
-                icon: Icons.arrow_back_rounded,
-                onTap: () => Navigator.of(context).maybePop(),
-              ),
-              const SizedBox(width: 12),
-            ],
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: text.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w900, letterSpacing: -0.4)),
-                  if (subtitle != null && subtitle!.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle!,
-                        style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(bottom: BorderSide(color: AppColors.line)),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (showBack) ...[
+                _FreshCircleBtn(
+                  icon: Icons.arrow_back_rounded,
+                  onTap: () => Navigator.of(context).maybePop(),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.titleLarge?.copyWith(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.2)),
+                    if (subtitle != null && subtitle!.isNotEmpty) ...[
+                      const SizedBox(height: 1),
+                      Text(subtitle!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.bodySmall
+                              ?.copyWith(color: AppColors.inkMuted, fontSize: 12)),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            for (final a in actions) ...[const SizedBox(width: 8), a],
-          ],
+              for (final a in actions) ...[const SizedBox(width: 8), a],
+            ],
+          ),
         ),
       ),
     );
@@ -72,13 +85,13 @@ class _FreshCircleBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.surface,
-      shape: CircleBorder(side: BorderSide(color: AppColors.line)),
+      color: AppColors.fieldFill,
+      shape: const CircleBorder(),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-            width: 40, height: 40, child: Icon(icon, size: 20, color: AppColors.ink)),
+            width: 36, height: 36, child: Icon(icon, size: 18, color: AppColors.ink)),
       ),
     );
   }
@@ -319,19 +332,19 @@ class FreshMealTile extends StatelessWidget {
                     : AppColors.line),
           ),
           child: Padding(
-            padding: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(13),
             child: Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(13),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(AppColors.iconForMeal(meal.name), color: color, size: 22),
+                  child: Icon(AppColors.iconForMeal(meal.name), color: color, size: 19),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 13),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

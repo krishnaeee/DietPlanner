@@ -111,14 +111,14 @@ class _HubTab extends StatelessWidget {
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 4),
             decoration: BoxDecoration(
               color: selected
                   ? AppColors.brand.withValues(alpha: 0.12)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Icon(icon, color: color, size: 23),
+            child: Icon(icon, color: color, size: 20),
           ),
           const SizedBox(height: 3),
           Text(label,

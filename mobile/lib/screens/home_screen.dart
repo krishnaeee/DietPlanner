@@ -167,10 +167,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 : _plans.isEmpty
                     ? _EmptyState(onAdd: _addPlan)
                     : ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
                         children: [
                           ..._plans.map((p) => Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.only(bottom: 13),
                                 child: _PlanCard(
                                   plan: p,
                                   onOpen: () => _openPlan(p),
@@ -299,15 +299,15 @@ class _SettingsBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.surface,
-      shape: CircleBorder(side: BorderSide(color: AppColors.line)),
+      color: AppColors.fieldFill,
+      shape: const CircleBorder(),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          width: 40,
-          height: 40,
-          child: Icon(Icons.person_rounded, size: 20, color: AppColors.inkMuted),
+          width: 36,
+          height: 36,
+          child: Icon(Icons.person_rounded, size: 18, color: AppColors.inkMuted),
         ),
       ),
     );
@@ -348,19 +348,20 @@ class _PlanCard extends StatelessWidget {
             boxShadow: softShadow(),
           ),
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(15),
             child: Row(
               children: [
                 Container(
-                  width: 48,
-                  height: 48,
+                  width: 42,
+                  height: 42,
                   decoration: BoxDecoration(
                     color: AppColors.brand.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.restaurant_menu_rounded, color: AppColors.brand),
+                  child: const Icon(Icons.restaurant_menu_rounded,
+                      color: AppColors.brand, size: 21),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 13),
                 Expanded(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
