@@ -28,26 +28,24 @@ class FreshHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return SafeArea(
-      bottom: false,
-      // Gap between the OS status bar and the app's top bar.
-      child: Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Container(
-          // Full-width band, flush to the sides, with a soft rounded bottom.
-          decoration: BoxDecoration(
-            gradient: AppColors.ctaGradient, // the brand theme colour
-            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.brand.withValues(alpha: 0.24),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
+    // The green fills the status bar (no gap); content sits below it via the
+    // top inset. Full-width, flush to the sides, soft rounded bottom.
+    return Container(
+      decoration: BoxDecoration(
+        gradient: AppColors.ctaGradient, // the brand theme colour
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.brand.withValues(alpha: 0.24),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
           ),
-          padding: EdgeInsets.fromLTRB(showBack ? 12 : 18, 12, 14, 14),
-          child: Row(
+        ],
+      ),
+      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(showBack ? 12 : 18, 12, 14, 14),
+        child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               if (showBack) ...[
@@ -85,8 +83,7 @@ class FreshHeader extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 }
 
