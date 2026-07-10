@@ -655,12 +655,12 @@ class _PlanViewState extends State<_PlanView> {
           showBack: true,
           actions: [
             if (!widget.embedded)
-              _HeaderAction(
+              HeaderPill(
                 icon: Icons.insights_rounded,
                 label: 'Progress',
                 onTap: _openProgress,
               ),
-            _HeaderIconButton(
+            HeaderCircleButton(
               icon: Icons.tune_rounded,
               tooltip: 'Diet settings',
               onTap: _openSettings,
@@ -1899,68 +1899,3 @@ class _MealCheck extends StatelessWidget {
 
 /// A pill button in the gradient header (e.g. "Progress").
 /// A compact icon-only pill in the gradient header (e.g. the settings gear).
-class _HeaderIconButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-  const _HeaderIconButton(
-      {required this.icon, required this.tooltip, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      shape: CircleBorder(side: BorderSide(color: AppColors.line)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Tooltip(
-          message: tooltip,
-          child: SizedBox(
-            width: 40,
-            height: 40,
-            child: Icon(icon, color: AppColors.inkMuted, size: 20),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HeaderAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  const _HeaderAction(
-      {required this.icon, required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.brand.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(AppRadius.pill),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: AppColors.brandDark, size: 18),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: AppColors.brandDark,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

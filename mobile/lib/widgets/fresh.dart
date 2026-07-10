@@ -28,20 +28,29 @@ class FreshHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border(bottom: BorderSide(color: AppColors.line)),
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+    return SafeArea(
+      bottom: false,
+      // Gap between the OS status bar and the app's top bar.
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: AppColors.ctaGradient, // the brand theme colour
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.brand.withValues(alpha: 0.28),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          padding: EdgeInsets.fromLTRB(showBack ? 10 : 18, 10, 12, 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               if (showBack) ...[
-                _FreshCircleBtn(
+                HeaderCircleButton(
                   icon: Icons.arrow_back_rounded,
                   onTap: () => Navigator.of(context).maybePop(),
                 ),
@@ -55,6 +64,7 @@ class FreshHeader extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: text.titleLarge?.copyWith(
+                            color: Colors.white,
                             fontSize: 19,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.2)),
@@ -63,8 +73,9 @@ class FreshHeader extends StatelessWidget {
                       Text(subtitle!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: text.bodySmall
-                              ?.copyWith(color: AppColors.inkMuted, fontSize: 12)),
+                          style: text.bodySmall?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontSize: 12)),
                     ],
                   ],
                 ),
@@ -78,20 +89,57 @@ class FreshHeader extends StatelessWidget {
   }
 }
 
-class _FreshCircleBtn extends StatelessWidget {
+/// A translucent-white circular button for the coloured Fresh header.
+class HeaderCircleButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _FreshCircleBtn({required this.icon, required this.onTap});
+  final String? tooltip;
+  const HeaderCircleButton(
+      {super.key, required this.icon, required this.onTap, this.tooltip});
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.fieldFill,
+    final btn = Material(
+      color: Colors.white.withValues(alpha: 0.2),
       shape: const CircleBorder(),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-            width: 36, height: 36, child: Icon(icon, size: 18, color: AppColors.ink)),
+            width: 36, height: 36, child: Icon(icon, size: 18, color: Colors.white)),
+      ),
+    );
+    return tooltip == null ? btn : Tooltip(message: tooltip!, child: btn);
+  }
+}
+
+/// A translucent-white pill (icon + label) for the coloured Fresh header.
+class HeaderPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const HeaderPill(
+      {super.key, required this.icon, required this.label, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.2),
+      borderRadius: BorderRadius.circular(AppRadius.pill),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white, size: 17),
+              const SizedBox(width: 5),
+              Text(label,
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+            ],
+          ),
+        ),
       ),
     );
   }

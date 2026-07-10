@@ -121,7 +121,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             showBack: true,
             actions: [
               if (_items.isNotEmpty)
-                _HeaderAction(
+                HeaderPill(
                   icon: Icons.copy_rounded,
                   label: 'Copy',
                   onTap: _copyToClipboard,
@@ -497,41 +497,3 @@ class _ScopeToggle extends StatelessWidget {
   }
 }
 
-/// Light pill button for the Fresh header (mirrors the plan screen's action).
-class _HeaderAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  const _HeaderAction(
-      {required this.icon, required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.brand.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(AppRadius.pill),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: AppColors.brandDark, size: 18),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: AppColors.brandDark,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

@@ -158,7 +158,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 : '${_plans.length} plan${_plans.length == 1 ? '' : 's'}',
             actions: [
               _CreditChip(onTap: _openPaywall),
-              _SettingsBtn(onTap: _openSettings),
+              HeaderCircleButton(
+                  icon: Icons.person_rounded,
+                  tooltip: 'Profile & settings',
+                  onTap: _openSettings),
             ],
           ),
           Expanded(
@@ -258,26 +261,26 @@ class _CreditChip extends StatelessWidget {
       builder: (context, ent, _) {
         final unlimited = ent.subscriptionActive;
         return Material(
-          color: AppColors.brand.withValues(alpha: 0.12),
+          color: Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(AppRadius.pill),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     unlimited ? Icons.all_inclusive_rounded : Icons.stars_rounded,
-                    color: AppColors.brandDark,
-                    size: 18,
+                    color: Colors.white,
+                    size: 17,
                   ),
                   const SizedBox(width: 5),
                   Text(
                     unlimited ? 'Unlimited' : '${ent.credits}',
                     style: const TextStyle(
-                      color: AppColors.brandDark,
+                      color: Colors.white,
                       fontWeight: FontWeight.w800,
                       fontSize: 14,
                     ),
@@ -288,28 +291,6 @@ class _CreditChip extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-/// Circular settings/profile button in the Plans header.
-class _SettingsBtn extends StatelessWidget {
-  final VoidCallback onTap;
-  const _SettingsBtn({required this.onTap});
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.fieldFill,
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          width: 36,
-          height: 36,
-          child: Icon(Icons.person_rounded, size: 18, color: AppColors.inkMuted),
-        ),
-      ),
     );
   }
 }

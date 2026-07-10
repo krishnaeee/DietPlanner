@@ -121,8 +121,11 @@ class _TodayScreenState extends State<TodayScreen> {
             subtitle: _greeting(),
             showBack: true,
             actions: [
-              if (streak > 0) StreakBadge(days: streak),
-              _CircleBtn(icon: Icons.tune_rounded, onTap: _openDietSettings),
+              if (streak > 0) StreakBadge(days: streak, light: true),
+              HeaderCircleButton(
+                  icon: Icons.tune_rounded,
+                  tooltip: 'Diet settings',
+                  onTap: _openDietSettings),
             ],
           ),
           Expanded(
@@ -240,25 +243,6 @@ class _DayPill extends StatelessWidget {
       child: Text(label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: AppColors.brandDark, fontWeight: FontWeight.w800)),
-    );
-  }
-}
-
-class _CircleBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _CircleBtn({required this.icon, required this.onTap});
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.fieldFill,
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-            width: 36, height: 36, child: Icon(icon, size: 18, color: AppColors.inkMuted)),
-      ),
     );
   }
 }
