@@ -12,6 +12,7 @@ import '../services/plan_storage.dart';
 import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/fresh.dart';
 import 'diet_settings_screen.dart';
 import 'grocery_list_screen.dart';
 import 'paywall_screen.dart';
@@ -135,7 +136,7 @@ class _PlanScreenState extends State<PlanScreen> {
           if (snap.connectionState != ConnectionState.done) {
             return Column(
               children: [
-                const GradientHeader(
+                const FreshHeader(
                   title: 'Building your plan',
                   subtitle: 'Our nutrition AI is putting together your week.',
                   showBack: true,
@@ -149,7 +150,7 @@ class _PlanScreenState extends State<PlanScreen> {
             if (snap.error is PaymentRequiredException) {
               return Column(
                 children: [
-                  const GradientHeader(title: 'Your diet plan', showBack: true),
+                  const FreshHeader(title: 'Your diet plan', showBack: true),
                   Expanded(
                     child: _PaywallPrompt(
                       message: (snap.error as PaymentRequiredException).message,
@@ -161,7 +162,7 @@ class _PlanScreenState extends State<PlanScreen> {
             }
             return Column(
               children: [
-                const GradientHeader(title: 'Your diet plan', showBack: true),
+                const FreshHeader(title: 'Your diet plan', showBack: true),
                 Expanded(
                   child: _ErrorView(message: snap.error.toString(), onRetry: _retry),
                 ),
@@ -640,26 +641,22 @@ class _PlanViewState extends State<_PlanView> {
 
     return Column(
       children: [
-        GradientHeader(
+        FreshHeader(
           title: 'Your diet plan',
           subtitle: sub,
           showBack: true,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _HeaderAction(
-                icon: Icons.insights_rounded,
-                label: 'Progress',
-                onTap: _openProgress,
-              ),
-              const SizedBox(width: 8),
-              _HeaderIconButton(
-                icon: Icons.tune_rounded,
-                tooltip: 'Diet settings',
-                onTap: _openSettings,
-              ),
-            ],
-          ),
+          actions: [
+            _HeaderAction(
+              icon: Icons.insights_rounded,
+              label: 'Progress',
+              onTap: _openProgress,
+            ),
+            _HeaderIconButton(
+              icon: Icons.tune_rounded,
+              tooltip: 'Diet settings',
+              onTap: _openSettings,
+            ),
+          ],
         ),
         Expanded(
           child: ListView(
@@ -1903,8 +1900,8 @@ class _HeaderIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.18),
-      shape: const CircleBorder(),
+      color: AppColors.surface,
+      shape: CircleBorder(side: BorderSide(color: AppColors.line)),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -1913,7 +1910,7 @@ class _HeaderIconButton extends StatelessWidget {
           child: SizedBox(
             width: 40,
             height: 40,
-            child: Icon(icon, color: Colors.white, size: 20),
+            child: Icon(icon, color: AppColors.inkMuted, size: 20),
           ),
         ),
       ),
@@ -1931,7 +1928,7 @@ class _HeaderAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.18),
+      color: AppColors.brand.withValues(alpha: 0.12),
       borderRadius: BorderRadius.circular(AppRadius.pill),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -1941,12 +1938,12 @@ class _HeaderAction extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: Colors.white, size: 18),
+              Icon(icon, color: AppColors.brandDark, size: 18),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: AppColors.brandDark,
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
                 ),

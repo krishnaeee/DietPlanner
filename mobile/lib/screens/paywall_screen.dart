@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/billing.dart';
 import '../services/billing_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common.dart';
+import '../widgets/fresh.dart';
 
 /// The paywall: shows the current balance and the three ways to pay —
 /// pay-per-generation (a single plan), credit packs, and an unlimited
@@ -65,7 +65,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
     return Scaffold(
       body: Column(
         children: [
-          const GradientHeader(
+          const FreshHeader(
             title: 'Plans & credits',
             subtitle: 'Pay only when you generate, save with a pack, or go unlimited.',
             showBack: true,

@@ -4,6 +4,7 @@ import '../services/notification_service.dart';
 import '../services/plan_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/fresh.dart';
 import 'settings_screen.dart';
 
 const _kWeekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -55,7 +56,7 @@ class _DietSettingsScreenState extends State<DietSettingsScreen> {
     return Scaffold(
       body: Column(
         children: [
-          GradientHeader(
+          FreshHeader(
             title: 'Diet settings',
             subtitle: name.isEmpty ? null : name,
             showBack: true,

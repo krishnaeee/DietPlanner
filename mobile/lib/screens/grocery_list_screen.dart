@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/diet_plan.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/fresh.dart';
 
 /// A consolidated shopping list for a window of days (default: the next 7 from
 /// the day the user was viewing). Ingredients are deduped by name and their
@@ -114,17 +115,18 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     return Scaffold(
       body: Column(
         children: [
-          GradientHeader(
+          FreshHeader(
             title: 'Grocery list',
             subtitle: sub,
             showBack: true,
-            trailing: _items.isEmpty
-                ? null
-                : _HeaderAction(
-                    icon: Icons.copy_rounded,
-                    label: 'Copy',
-                    onTap: _copyToClipboard,
-                  ),
+            actions: [
+              if (_items.isNotEmpty)
+                _HeaderAction(
+                  icon: Icons.copy_rounded,
+                  label: 'Copy',
+                  onTap: _copyToClipboard,
+                ),
+            ],
           ),
           if (_weekCount > 1)
             Padding(
@@ -495,7 +497,7 @@ class _ScopeToggle extends StatelessWidget {
   }
 }
 
-/// Pill button used in the gradient header (mirrors the plan screen's action).
+/// Light pill button for the Fresh header (mirrors the plan screen's action).
 class _HeaderAction extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -506,7 +508,7 @@ class _HeaderAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.18),
+      color: AppColors.brand.withValues(alpha: 0.12),
       borderRadius: BorderRadius.circular(AppRadius.pill),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -516,12 +518,12 @@ class _HeaderAction extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: Colors.white, size: 18),
+              Icon(icon, color: AppColors.brandDark, size: 18),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: AppColors.brandDark,
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
                 ),
