@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/auth_gate.dart';
+import 'services/active_plan.dart';
 import 'services/app_router.dart';
 import 'services/notification_service.dart';
 import 'services/theme_controller.dart';
@@ -14,8 +15,9 @@ void main() async {
     statusBarIconBrightness: Brightness.light,
     statusBarBrightness: Brightness.dark,
   ));
-  // Restore the saved light/dark preference before the first frame.
+  // Restore the saved light/dark preference and active-plan selection.
   await ThemeController.instance.load();
+  await ActivePlan.load();
   // Initialize the notification plugin + timezones (no permission prompt yet —
   // that happens when the user opts into reminders).
   await NotificationService.instance.init();

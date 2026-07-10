@@ -123,7 +123,7 @@ class _PlanScreenState extends State<PlanScreen> {
 
   static DateTime _defaultStart() {
     final n = DateTime.now();
-    return DateTime(n.year, n.month, n.day + 1); // tomorrow
+    return DateTime(n.year, n.month, n.day); // today — so the Today tab = Day 1
   }
 
   @override

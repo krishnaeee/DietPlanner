@@ -7,9 +7,9 @@ import '../widgets/common.dart';
 import 'paywall_screen.dart';
 import 'plan_screen.dart';
 
-/// The plan-generation form. Reached from the home's "New plan" / add button.
-/// On generate it replaces itself with the [PlanScreen], so backing out of the
-/// plan returns to the home list.
+/// The plan-creation flow — a step-by-step wizard (Goal → Body → Where → About).
+/// On the last step it generates and replaces itself with the [PlanScreen], so
+/// backing out of the plan returns to where the wizard was opened from.
 class AddPlanScreen extends StatefulWidget {
   const AddPlanScreen({super.key});
 
@@ -18,9 +18,13 @@ class AddPlanScreen extends StatefulWidget {
 }
 
 class _AddPlanScreenState extends State<AddPlanScreen> {
-  final _formKey = GlobalKey<FormState>();
+  final _pageCtrl = PageController();
+  int _step = 0;
+  static const _stepCount = 4;
+  final _bodyKey = GlobalKey<FormState>(); // step 1 (body)
+  final _whereKey = GlobalKey<FormState>(); // step 2 (location & duration)
+  final _aboutKey = GlobalKey<FormState>(); // step 3 (about you)
 
-  // Pre-filled defaults for quick testing. Clear these for production.
   final _weight = TextEditingController(text: '75');
   final _height = TextEditingController(text: '163');
   final _location = TextEditingController(text: 'pollachi');
@@ -40,10 +44,10 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
   @override
   void initState() {
     super.initState();
-    // Refresh the live BMI / goal indicators as the body inputs change.
     _weight.addListener(_refresh);
     _targetWeight.addListener(_refresh);
     _height.addListener(_refresh);
+    _dietPref.addListener(_refresh); // keep the quick-pick chips in sync
   }
 
   void _refresh() => setState(() {});
@@ -56,6 +60,7 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
 
   @override
   void dispose() {
+    _pageCtrl.dispose();
     _weight.dispose();
     _height.dispose();
     _location.dispose();
@@ -67,6 +72,34 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     super.dispose();
   }
 
+  // ─────────────────────────────────────────────────────── navigation ──
+
+  void _next() {
+    FocusScope.of(context).unfocus();
+    // Validate the CURRENT step's form (it is mounted; later pages may not be).
+    if (_step == 1 && !(_bodyKey.currentState?.validate() ?? true)) return;
+    if (_step == 2 && !(_whereKey.currentState?.validate() ?? true)) return;
+    if (_step == 3 && !(_aboutKey.currentState?.validate() ?? true)) return;
+    if (_step >= _stepCount - 1) {
+      _submit();
+      return;
+    }
+    _pageCtrl.nextPage(
+        duration: const Duration(milliseconds: 260), curve: Curves.easeOut);
+  }
+
+  void _back() {
+    if (_step == 0) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    _pageCtrl.previousPage(
+        duration: const Duration(milliseconds: 260), curve: Curves.easeOut);
+  }
+
+  // ─────────────────────────────────────────────────── validation/math ──
+
   String? _requiredNumber(String? v, {double min = 0, double max = 1000}) {
     if (v == null || v.trim().isEmpty) return 'Required';
     final n = double.tryParse(v.trim());
@@ -75,60 +108,9 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     return null;
   }
 
-  void _submit() {
-    FocusScope.of(context).unfocus();
-    if (!_formKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fix the highlighted fields.')),
-      );
-      return;
-    }
-
-    // If we already know there's no balance, show the paywall up front rather
-    // than navigating in and bouncing off the backend's 402. (The backend is
-    // still the source of truth — this is just a faster path.)
-    if (!BillingService.instance.entitlements.value.canGenerate) {
-      _openPaywall();
-      return;
-    }
-
-    final periodValue = int.parse(_period.text.trim());
-    final targetDays = _periodUnit == 'weeks' ? periodValue * 7 : periodValue;
-
-    final body = <String, dynamic>{
-      'weightKg': double.parse(_weight.text.trim()),
-      'heightCm': double.parse(_height.text.trim()),
-      'location': _location.text.trim(),
-      'targetDays': targetDays,
-      'goal': _goal,
-      // Target weight only matters for lose/gain; "eat healthy" plans maintain.
-      if (!_maintain) 'targetWeightKg': double.parse(_targetWeight.text.trim()),
-      if (_age.text.trim().isNotEmpty) 'age': int.tryParse(_age.text.trim()),
-      'sex': _sex,
-      'activityLevel': _activity,
-      if (_dietPref.text.trim().isNotEmpty) 'dietaryPreference': _dietPref.text.trim(),
-    };
-
-    // Replace this form with the plan so backing out of the plan lands on home.
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => PlanScreen(
-          requestBody: body,
-          location: _location.text.trim(),
-          planName: _planName.text.trim(),
-        ),
-      ),
-    );
-  }
-
-  /// Live BMI from the entered weight + height, with its category, a colour, and
-  /// the healthy weight range (BMI 18.5–24.9) for the height. Null until both
-  /// inputs are valid.
   ({double bmi, String category, Color color, double lo, double hi})? get _bmi {
     final w = double.tryParse(_weight.text.trim());
     final h = double.tryParse(_height.text.trim());
-    // Guard against nonsense (e.g. height typed in metres) so the card doesn't
-    // render an absurd BMI. Bounds match the field validators.
     if (w == null || h == null || w < 20 || w > 500 || h < 50 || h > 300) {
       return null;
     }
@@ -152,7 +134,6 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     return (bmi: bmi, category: category, color: color, lo: 18.5 * m * m, hi: 24.9 * m * m);
   }
 
-  /// A sensible "healthy" target weight (BMI 22) for the current height.
   double? get _healthyTarget {
     final h = double.tryParse(_height.text.trim());
     if (h == null || h < 50 || h > 300) return null;
@@ -160,9 +141,6 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     return 22 * m * m;
   }
 
-  /// Only offer the "use healthy target" shortcut when the healthy weight is on
-  /// the correct side of the current weight for the chosen goal — otherwise it
-  /// would fill a target that contradicts the goal.
   bool get _healthyTargetSensible {
     if (_maintain) return false;
     final w = double.tryParse(_weight.text.trim());
@@ -177,8 +155,6 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     _targetWeight.text = t.round().toString();
   }
 
-  /// Validates the target weight: a number in range AND on the correct side of
-  /// the current weight for the goal (below for lose, above for gain).
   String? _validateTarget(String? v) {
     final base = _requiredNumber(v, min: 20, max: 500);
     if (base != null) return base;
@@ -191,301 +167,427 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     return null;
   }
 
+  void _submit() {
+    FocusScope.of(context).unfocus();
+    // Each step was validated as the user advanced (its form was mounted then),
+    // so we don't re-validate now — the earlier pages may be unmounted and their
+    // form state null, which would silently pass. Gating on _next is the guard.
+    if (!BillingService.instance.entitlements.value.canGenerate) {
+      _openPaywall();
+      return;
+    }
+
+    final periodValue = int.parse(_period.text.trim());
+    final targetDays = _periodUnit == 'weeks' ? periodValue * 7 : periodValue;
+
+    final body = <String, dynamic>{
+      'weightKg': double.parse(_weight.text.trim()),
+      'heightCm': double.parse(_height.text.trim()),
+      'location': _location.text.trim(),
+      'targetDays': targetDays,
+      'goal': _goal,
+      if (!_maintain) 'targetWeightKg': double.parse(_targetWeight.text.trim()),
+      if (_age.text.trim().isNotEmpty) 'age': int.tryParse(_age.text.trim()),
+      'sex': _sex,
+      'activityLevel': _activity,
+      if (_dietPref.text.trim().isNotEmpty) 'dietaryPreference': _dietPref.text.trim(),
+    };
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => PlanScreen(
+          requestBody: body,
+          location: _location.text.trim(),
+          planName: _planName.text.trim(),
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────── build ──
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Column(
         children: [
-          const GradientHeader(
-            title: 'New plan',
-            subtitle: 'Tell us a little about you and we\'ll build a day-by-day plan with food local to you.',
-            showBack: true,
-          ),
-          Expanded(
-            child: Form(
-              key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+              child: Row(
                 children: [
-                  SectionCard(
-                    title: 'Who is this for?',
-                    icon: Icons.badge_outlined,
-                    child: _LabeledField(
-                      label: 'Plan name',
-                      controller: _planName,
-                      hint: 'e.g. Me, Wife, Son',
-                      icon: Icons.person_outline_rounded,
-                      capitalize: true,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SectionCard(
-                    title: 'What\'s your goal?',
-                    icon: Icons.flag_outlined,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _PillToggle<String>(
-                          selected: _goal,
-                          onChanged: (v) => setState(() => _goal = v),
-                          options: const [
-                            (value: 'lose', label: 'Lose', icon: Icons.trending_down_rounded),
-                            (value: 'gain', label: 'Gain', icon: Icons.trending_up_rounded),
-                            (value: 'maintain', label: 'Healthy', icon: Icons.favorite_rounded),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _maintain
-                              ? 'A balanced plan to maintain your weight and eat well — no target needed.'
-                              : _goal == 'gain'
-                                  ? 'A higher-calorie, protein-rich plan to reach your target weight.'
-                                  : 'A safe-deficit plan to reach your target weight.',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppColors.inkMuted,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SectionCard(
-                    title: 'Your body',
-                    icon: Icons.monitor_weight_outlined,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: _LabeledField(
-                                label: 'Current weight',
-                                controller: _weight,
-                                suffix: 'kg',
-                                icon: Icons.monitor_weight_rounded,
-                                number: true,
-                                validator: (v) => _requiredNumber(v, min: 20, max: 500),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _LabeledField(
-                                label: 'Height',
-                                controller: _height,
-                                suffix: 'cm',
-                                icon: Icons.straighten_rounded,
-                                number: true,
-                                validator: (v) => _requiredNumber(v, min: 50, max: 300),
-                              ),
-                            ),
-                          ],
-                        ),
-                        // Target weight only for lose/gain — "eat healthy" maintains.
-                        if (!_maintain) ...[
-                          const SizedBox(height: 14),
-                          _LabeledField(
-                            label: 'Target weight',
-                            controller: _targetWeight,
-                            suffix: 'kg',
-                            icon: Icons.flag_rounded,
-                            number: true,
-                            autovalidate: true,
-                            validator: _validateTarget,
-                          ),
-                        ],
-                        if (_bmi != null) ...[
-                          const SizedBox(height: 16),
-                          _BmiCard(
-                            bmi: _bmi!,
-                            onUseHealthy:
-                                _healthyTargetSensible ? _useHealthyTarget : null,
-                            healthyTarget: _healthyTarget,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SectionCard(
-                    title: 'Location & duration',
-                    icon: Icons.route_rounded,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _LabeledField(
-                          label: 'Location (city, country)',
-                          controller: _location,
-                          hint: 'e.g. Chennai, India',
-                          icon: Icons.place_rounded,
-                          capitalize: true,
-                          validator: (v) =>
-                              (v == null || v.trim().isEmpty) ? 'Required' : null,
-                        ),
-                        const SizedBox(height: 14),
-                        const FieldLabel('Target period'),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: 96,
-                              child: _LabeledField(
-                                controller: _period,
-                                icon: Icons.schedule_rounded,
-                                number: true,
-                                validator: (v) {
-                                  if (v == null || v.trim().isEmpty) return '!';
-                                  final n = int.tryParse(v.trim());
-                                  if (n == null || n <= 0) return '!';
-                                  return null;
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _PillToggle<String>(
-                                selected: _periodUnit,
-                                onChanged: (v) => setState(() => _periodUnit = v),
-                                options: const [
-                                  (value: 'weeks', label: 'Weeks', icon: null),
-                                  (value: 'days', label: 'Days', icon: null),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SectionCard(
-                    title: 'About you',
-                    icon: Icons.person_outline_rounded,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Optional — these sharpen the plan.',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppColors.inkMuted,
-                              ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: 110,
-                              child: _LabeledField(
-                                label: 'Age',
-                                controller: _age,
-                                icon: Icons.cake_rounded,
-                                number: true,
-                                validator: (v) {
-                                  if (v == null || v.trim().isEmpty) return null;
-                                  final n = int.tryParse(v.trim());
-                                  if (n == null || n <= 0 || n >= 120) {
-                                    return 'Invalid';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const FieldLabel('Sex'),
-                                  _PillToggle<String>(
-                                    selected: _sex,
-                                    onChanged: (v) => setState(() => _sex = v),
-                                    options: const [
-                                      (value: 'male', label: 'Male', icon: Icons.male_rounded),
-                                      (value: 'female', label: 'Female', icon: Icons.female_rounded),
-                                      (value: 'other', label: 'Other', icon: Icons.person_rounded),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        const FieldLabel('Activity level'),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: const [
-                            (value: 'sedentary', label: 'Sedentary'),
-                            (value: 'light', label: 'Light'),
-                            (value: 'moderate', label: 'Moderate'),
-                            (value: 'active', label: 'Active'),
-                            (value: 'very_active', label: 'Very active'),
-                          ]
-                              .map((o) => _ChoicePill(
-                                    label: o.label,
-                                    selected: _activity == o.value,
-                                    onTap: () => setState(() => _activity = o.value),
-                                  ))
-                              .toList(),
-                        ),
-                        const SizedBox(height: 16),
-                        _LabeledField(
-                          label: 'Dietary preference',
-                          controller: _dietPref,
-                          hint: 'e.g. vegetarian, no pork',
-                          icon: Icons.restaurant_menu_rounded,
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: const [
-                            'Vegetarian',
-                            'Vegan',
-                            'Eggetarian',
-                            'Non-veg',
-                            'Jain',
-                            'Keto',
-                          ]
-                              .map((d) => _ChoicePill(
-                                    label: d,
-                                    dense: true,
-                                    selected: _dietPref.text.toLowerCase() == d.toLowerCase(),
-                                    onTap: () => setState(() {
-                                      _dietPref.text =
-                                          _dietPref.text.toLowerCase() == d.toLowerCase()
-                                              ? ''
-                                              : d;
-                                    }),
-                                  ))
-                              .toList(),
-                        ),
-                      ],
-                    ),
-                  ),
+                  _CircleBack(onTap: _back),
+                  const SizedBox(width: 14),
+                  Expanded(child: _StepProgress(step: _step, total: _stepCount)),
+                  const SizedBox(width: 14),
+                  Text('${_step + 1} of $_stepCount',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: AppColors.inkMuted, fontWeight: FontWeight.w700)),
                 ],
               ),
             ),
           ),
+          Expanded(
+            child: PageView(
+              controller: _pageCtrl,
+              physics: const NeverScrollableScrollPhysics(),
+              onPageChanged: (i) => setState(() => _step = i),
+              children: [_goalStep(), _bodyStep(), _whereStep(), _aboutStep()],
+            ),
+          ),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: AppColors.bg,
-          border: Border(top: BorderSide(color: AppColors.line)),
+      bottomNavigationBar: _bottomBar(),
+    );
+  }
+
+  Widget _stepScaffold({
+    required String title,
+    required String subtitle,
+    required List<Widget> children,
+  }) {
+    final text = Theme.of(context).textTheme;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+      children: [
+        Text(title,
+            style: text.headlineMedium
+                ?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+        const SizedBox(height: 6),
+        Text(subtitle,
+            style: text.bodyMedium?.copyWith(color: AppColors.inkMuted, height: 1.35)),
+        const SizedBox(height: 24),
+        ...children,
+      ],
+    );
+  }
+
+  Widget _goalStep() {
+    final text = Theme.of(context).textTheme;
+    return _stepScaffold(
+      title: "What's your goal?",
+      subtitle: "We'll shape the whole plan — calories, macros and meals — around this.",
+      children: [
+        _PillToggle<String>(
+          selected: _goal,
+          onChanged: (v) => setState(() => _goal = v),
+          options: const [
+            (value: 'lose', label: 'Lose', icon: Icons.trending_down_rounded),
+            (value: 'gain', label: 'Gain', icon: Icons.trending_up_rounded),
+            (value: 'maintain', label: 'Healthy', icon: Icons.favorite_rounded),
+          ],
         ),
-        child: SafeArea(
-          top: false,
-          minimum: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: PrimaryButton(
-            label: 'Generate my diet plan',
-            icon: Icons.auto_awesome_rounded,
-            onPressed: _submit,
+        const SizedBox(height: 12),
+        Text(
+          _maintain
+              ? 'A balanced plan to maintain your weight and eat well — no target needed.'
+              : _goal == 'gain'
+                  ? 'A higher-calorie, protein-rich plan to reach your target weight.'
+                  : 'A safe-deficit plan to reach your target weight.',
+          style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
+        ),
+        const SizedBox(height: 26),
+        const FieldLabel('Plan name (optional)'),
+        _LabeledField(
+          controller: _planName,
+          hint: 'e.g. Me, Wife, Son',
+          icon: Icons.person_outline_rounded,
+          capitalize: true,
+        ),
+      ],
+    );
+  }
+
+  Widget _bodyStep() {
+    return Form(
+      key: _bodyKey,
+      child: _stepScaffold(
+        title: 'Your body',
+        subtitle: 'So the calories and macros fit you accurately.',
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _LabeledField(
+                  label: 'Current weight',
+                  controller: _weight,
+                  suffix: 'kg',
+                  icon: Icons.monitor_weight_rounded,
+                  number: true,
+                  validator: (v) => _requiredNumber(v, min: 20, max: 500),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _LabeledField(
+                  label: 'Height',
+                  controller: _height,
+                  suffix: 'cm',
+                  icon: Icons.straighten_rounded,
+                  number: true,
+                  validator: (v) => _requiredNumber(v, min: 50, max: 300),
+                ),
+              ),
+            ],
           ),
+          if (!_maintain) ...[
+            const SizedBox(height: 14),
+            _LabeledField(
+              label: 'Target weight',
+              controller: _targetWeight,
+              suffix: 'kg',
+              icon: Icons.flag_rounded,
+              number: true,
+              autovalidate: true,
+              validator: _validateTarget,
+            ),
+          ],
+          if (_bmi != null) ...[
+            const SizedBox(height: 16),
+            _BmiCard(
+              bmi: _bmi!,
+              onUseHealthy: _healthyTargetSensible ? _useHealthyTarget : null,
+              healthyTarget: _healthyTarget,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _whereStep() {
+    return Form(
+      key: _whereKey,
+      child: _stepScaffold(
+        title: 'Where & how long',
+        subtitle: 'We build the menu from dishes local to you.',
+        children: [
+          _LabeledField(
+            label: 'Location (city, country)',
+            controller: _location,
+            hint: 'e.g. Chennai, India',
+            icon: Icons.place_rounded,
+            capitalize: true,
+            validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+          ),
+          const SizedBox(height: 16),
+          const FieldLabel('Plan length'),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 96,
+                child: _LabeledField(
+                  controller: _period,
+                  icon: Icons.schedule_rounded,
+                  number: true,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return '!';
+                    final n = int.tryParse(v.trim());
+                    if (n == null || n <= 0) return '!';
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _PillToggle<String>(
+                  selected: _periodUnit,
+                  onChanged: (v) => setState(() => _periodUnit = v),
+                  options: const [
+                    (value: 'weeks', label: 'Weeks', icon: null),
+                    (value: 'days', label: 'Days', icon: null),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _aboutStep() {
+    return Form(
+      key: _aboutKey,
+      child: _stepScaffold(
+        title: 'A little about you',
+        subtitle: 'Optional — these sharpen the plan. Skip anything you like.',
+        children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 110,
+              child: _LabeledField(
+                label: 'Age',
+                controller: _age,
+                icon: Icons.cake_rounded,
+                number: true,
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return null;
+                  final n = int.tryParse(v.trim());
+                  if (n == null || n <= 0 || n >= 120) return 'Invalid';
+                  return null;
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const FieldLabel('Sex'),
+                  _PillToggle<String>(
+                    selected: _sex,
+                    onChanged: (v) => setState(() => _sex = v),
+                    options: const [
+                      (value: 'male', label: 'Male', icon: Icons.male_rounded),
+                      (value: 'female', label: 'Female', icon: Icons.female_rounded),
+                      (value: 'other', label: 'Other', icon: Icons.person_rounded),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        const FieldLabel('Activity level'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: const [
+            (value: 'sedentary', label: 'Sedentary'),
+            (value: 'light', label: 'Light'),
+            (value: 'moderate', label: 'Moderate'),
+            (value: 'active', label: 'Active'),
+            (value: 'very_active', label: 'Very active'),
+          ]
+              .map((o) => _ChoicePill(
+                    label: o.label,
+                    selected: _activity == o.value,
+                    onTap: () => setState(() => _activity = o.value),
+                  ))
+              .toList(),
+        ),
+        const SizedBox(height: 18),
+        _LabeledField(
+          label: 'Dietary preference',
+          controller: _dietPref,
+          hint: 'e.g. vegetarian, no pork',
+          icon: Icons.restaurant_menu_rounded,
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: const ['Vegetarian', 'Vegan', 'Eggetarian', 'Non-veg', 'Jain', 'Keto']
+              .map((d) => _ChoicePill(
+                    label: d,
+                    dense: true,
+                    selected: _dietPref.text.toLowerCase() == d.toLowerCase(),
+                    onTap: () => setState(() {
+                      _dietPref.text =
+                          _dietPref.text.toLowerCase() == d.toLowerCase() ? '' : d;
+                    }),
+                  ))
+              .toList(),
+        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bottomBar() {
+    final last = _step == _stepCount - 1;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.bg,
+        border: Border(top: BorderSide(color: AppColors.line)),
+      ),
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+        child: Row(
+          children: [
+            if (_step > 0) ...[
+              SizedBox(
+                height: 54,
+                child: OutlinedButton(
+                  onPressed: _back,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.inkMuted,
+                    side: BorderSide(color: AppColors.line),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.field)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                  ),
+                  child: const Text('Back'),
+                ),
+              ),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: PrimaryButton(
+                label: last ? 'Generate my plan' : 'Continue',
+                icon: last ? Icons.auto_awesome_rounded : Icons.arrow_forward_rounded,
+                onPressed: _next,
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+/// A soft circular back button for the wizard header.
+class _CircleBack extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CircleBack({required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      shape: CircleBorder(side: BorderSide(color: AppColors.line)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(Icons.arrow_back_rounded, size: 20, color: AppColors.ink),
+        ),
+      ),
+    );
+  }
+}
+
+/// A segmented progress bar for the wizard steps.
+class _StepProgress extends StatelessWidget {
+  final int step, total;
+  const _StepProgress({required this.step, required this.total});
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (var i = 0; i < total; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          Expanded(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              height: 6,
+              decoration: BoxDecoration(
+                color: i <= step ? AppColors.brand : AppColors.line,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -548,7 +650,7 @@ class _LabeledField extends StatelessWidget {
   }
 }
 
-/// A segmented pill control (e.g. weeks/days, sex).
+/// A segmented pill control (e.g. goal, weeks/days, sex).
 class _PillToggle<T> extends StatelessWidget {
   final List<({T value, String label, IconData? icon})> options;
   final T selected;
@@ -563,7 +665,7 @@ class _PillToggle<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 52,
+      height: 54,
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: AppColors.fieldFill,
@@ -580,17 +682,24 @@ class _PillToggle<T> extends StatelessWidget {
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOut,
                 decoration: BoxDecoration(
-                  color: sel ? AppColors.surfaceHigh : Colors.transparent,
+                  color: sel ? AppColors.brand : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
-                  border: sel ? Border.all(color: AppColors.line) : null,
+                  boxShadow: sel
+                      ? [
+                          BoxShadow(
+                            color: AppColors.brand.withValues(alpha: 0.30),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : null,
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     if (o.icon != null) ...[
                       Icon(o.icon,
-                          size: 16,
-                          color: sel ? AppColors.brand : AppColors.inkMuted),
+                          size: 16, color: sel ? Colors.white : AppColors.inkMuted),
                       const SizedBox(width: 4),
                     ],
                     Flexible(
@@ -600,7 +709,7 @@ class _PillToggle<T> extends StatelessWidget {
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 13,
-                          color: sel ? AppColors.ink : AppColors.inkMuted,
+                          color: sel ? Colors.white : AppColors.inkMuted,
                         ),
                       ),
                     ),
@@ -639,9 +748,7 @@ class _ChoicePill extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? AppColors.brand : AppColors.fieldFill,
           borderRadius: BorderRadius.circular(AppRadius.chip),
-          border: Border.all(
-            color: selected ? AppColors.brand : AppColors.line,
-          ),
+          border: Border.all(color: selected ? AppColors.brand : AppColors.line),
         ),
         child: Text(
           label,
@@ -656,8 +763,7 @@ class _ChoicePill extends StatelessWidget {
   }
 }
 
-/// Live BMI readout: value, category, healthy weight range, and (for a weight
-/// goal) a one-tap "use a healthy target" shortcut.
+/// Live BMI readout with a one-tap "healthy target" shortcut for weight goals.
 class _BmiCard extends StatelessWidget {
   final ({double bmi, String category, Color color, double lo, double hi}) bmi;
   final VoidCallback? onUseHealthy;
@@ -676,7 +782,7 @@ class _BmiCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: bmi.color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -692,9 +798,7 @@ class _BmiCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: bmi.color,
-                  borderRadius: BorderRadius.circular(30),
-                ),
+                    color: bmi.color, borderRadius: BorderRadius.circular(30)),
                 child: Text(bmi.category,
                     style: text.labelSmall?.copyWith(
                         color: Colors.white, fontWeight: FontWeight.w800)),
@@ -722,7 +826,7 @@ class _BmiCard extends StatelessWidget {
   }
 }
 
-/// The gradient primary button used as the sticky CTA (also reused on home).
+/// The gradient primary button used as a sticky CTA (reused across the app).
 class PrimaryButton extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -739,8 +843,15 @@ class PrimaryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        gradient: AppColors.ctaGradient,
+        gradient: AppColors.brandGradient,
         borderRadius: BorderRadius.circular(AppRadius.field),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.brand.withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Material(
         color: Colors.transparent,

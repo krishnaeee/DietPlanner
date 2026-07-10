@@ -5,12 +5,15 @@ import '../services/notification_service.dart';
 import '../services/theme_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/fresh.dart';
 
 /// App-level settings, opened from the home header's app icon: appearance
 /// (light/dark), account, and about. (Per-plan reminder settings live in
 /// DietSettingsScreen, opened from a plan.)
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key});
+  /// When shown as a bottom-nav tab (not pushed), hide the back button.
+  final bool embedded;
+  const SettingsScreen({super.key, this.embedded = false});
 
   @override
   Widget build(BuildContext context) {
@@ -20,10 +23,10 @@ class SettingsScreen extends StatelessWidget {
     return Scaffold(
       body: Column(
         children: [
-          const GradientHeader(
+          FreshHeader(
             title: 'Settings',
             subtitle: 'Appearance & account',
-            showBack: true,
+            showBack: !embedded,
           ),
           Expanded(
             child: ListView(

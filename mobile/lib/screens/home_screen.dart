@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../models/billing.dart';
-import '../services/auth_service.dart';
 import '../services/billing_service.dart';
 import '../services/notification_service.dart';
 import '../services/plan_storage.dart';
 import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common.dart';
+import '../widgets/fresh.dart';
 import 'add_plan_screen.dart';
 import 'paywall_screen.dart';
 import 'plan_screen.dart';
-import 'settings_screen.dart';
 
 /// The home: a list of the account's saved plans plus an "add" button that opens
 /// the plan-generation flow. Plan generation itself lives in [AddPlanScreen].
@@ -66,12 +64,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openPaywall() {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const PaywallScreen()),
-    );
-  }
-
-  void _openSettings() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
   }
 
@@ -152,18 +144,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: Column(
         children: [
-          GradientHeader(
-            title: 'AI Diet Planner',
-            subtitle: 'Your saved plans',
-            badge: _LeafBadge(onTap: _openSettings),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _CreditChip(onTap: _openPaywall),
-                const SizedBox(width: 8),
-                _AccountMenu(onPlans: _openPaywall),
-              ],
-            ),
+          FreshHeader(
+            title: 'Your plans',
+            subtitle: _plans.isEmpty
+                ? null
+                : '${_plans.length} plan${_plans.length == 1 ? '' : 's'}',
+            actions: [_CreditChip(onTap: _openPaywall)],
           ),
           Expanded(
             child: _loading
@@ -171,16 +157,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 : _plans.isEmpty
                     ? _EmptyState(onAdd: _addPlan)
                     : ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 96),
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.only(left: 4, bottom: 10),
-                            child: Text('Your plans',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w800)),
-                          ),
                           ..._plans.map((p) => Padding(
                                 padding: const EdgeInsets.only(bottom: 10),
                                 child: _PlanCard(
@@ -257,32 +235,8 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// The app-icon badge in the header. Doubles as the Settings entry point.
-class _LeafBadge extends StatelessWidget {
-  final VoidCallback onTap;
-  const _LeafBadge({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.2),
-      borderRadius: BorderRadius.circular(14),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Tooltip(
-          message: 'Settings',
-          child: const SizedBox(
-            width: 44,
-            height: 44,
-            child: Icon(Icons.eco_rounded, color: Colors.white, size: 24),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// A tappable balance pill in the header: "3" credits or "∞" when unlimited.
+/// Light Fresh styling (brand-tinted) to sit on the page ground.
 class _CreditChip extends StatelessWidget {
   final VoidCallback onTap;
   const _CreditChip({required this.onTap});
@@ -294,26 +248,26 @@ class _CreditChip extends StatelessWidget {
       builder: (context, ent, _) {
         final unlimited = ent.subscriptionActive;
         return Material(
-          color: Colors.white.withValues(alpha: 0.2),
+          color: AppColors.brand.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(AppRadius.pill),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     unlimited ? Icons.all_inclusive_rounded : Icons.stars_rounded,
-                    color: Colors.white,
+                    color: AppColors.brandDark,
                     size: 18,
                   ),
                   const SizedBox(width: 5),
                   Text(
                     unlimited ? 'Unlimited' : '${ent.credits}',
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: AppColors.brandDark,
                       fontWeight: FontWeight.w800,
                       fontSize: 14,
                     ),
@@ -324,37 +278,6 @@ class _CreditChip extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-/// Header account menu: shows the signed-in email, Plans & credits, and Log out.
-class _AccountMenu extends StatelessWidget {
-  final VoidCallback onPlans;
-  const _AccountMenu({required this.onPlans});
-
-  @override
-  Widget build(BuildContext context) {
-    final email = AuthService.instance.email ?? '';
-    return PopupMenuButton<String>(
-      icon: const Icon(Icons.account_circle_rounded, color: Colors.white),
-      onSelected: (v) async {
-        if (v == 'plans') {
-          onPlans();
-        } else if (v == 'logout') {
-          await NotificationService.instance.cancelAll();
-          await AuthService.instance.logout();
-        }
-      },
-      itemBuilder: (_) => [
-        if (email.isNotEmpty)
-          PopupMenuItem<String>(
-            enabled: false,
-            child: Text(email, style: const TextStyle(fontWeight: FontWeight.w600)),
-          ),
-        const PopupMenuItem<String>(value: 'plans', child: Text('Plans & credits')),
-        const PopupMenuItem<String>(value: 'logout', child: Text('Log out')),
-      ],
     );
   }
 }

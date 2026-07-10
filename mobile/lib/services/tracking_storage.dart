@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/tracking.dart';
@@ -11,6 +12,10 @@ import 'auth_service.dart';
 class TrackingStorage {
   TrackingStorage._();
   static const _base = 'tracking_v1';
+
+  /// Bumped on every write so screens sharing a plan's tracking (Today ↔
+  /// Progress) reload instead of showing — or clobbering — a stale copy.
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
 
   static String get _key {
     final email = AuthService.instance.email;
@@ -41,6 +46,7 @@ class TrackingStorage {
     final map = await _loadMap();
     map[planId] = t.toJson();
     await prefs.setString(_key, jsonEncode(map));
+    revision.value++;
   }
 
   /// Drops a plan's tracking (call when the plan itself is deleted).

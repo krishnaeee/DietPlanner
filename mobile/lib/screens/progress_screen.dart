@@ -9,12 +9,16 @@ import '../services/plan_storage.dart';
 import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/fresh.dart';
 
 /// Tracking & engagement dashboard for one plan: weight progress, daily streak,
 /// meal adherence, and water intake (with optional hydration reminders).
 class ProgressScreen extends StatefulWidget {
   final StoredPlan stored;
-  const ProgressScreen({super.key, required this.stored});
+
+  /// When shown as a bottom-nav tab (not pushed), hide the back button.
+  final bool embedded;
+  const ProgressScreen({super.key, required this.stored, this.embedded = false});
 
   @override
   State<ProgressScreen> createState() => _ProgressScreenState();
@@ -31,6 +35,15 @@ class _ProgressScreenState extends State<ProgressScreen> {
   void initState() {
     super.initState();
     _loadTracking();
+    // Reload if the tracking is changed elsewhere (e.g. meal check-off on the
+    // Today tab) so this tab never shows — or writes back — a stale copy.
+    TrackingStorage.revision.addListener(_loadTracking);
+  }
+
+  @override
+  void dispose() {
+    TrackingStorage.revision.removeListener(_loadTracking);
+    super.dispose();
   }
 
   Future<void> _loadTracking() async {
@@ -109,10 +122,10 @@ class _ProgressScreenState extends State<ProgressScreen> {
     return Scaffold(
       body: Column(
         children: [
-          GradientHeader(
+          FreshHeader(
             title: 'Your progress',
             subtitle: name.isEmpty ? null : name,
-            showBack: true,
+            showBack: !widget.embedded,
           ),
           Expanded(
             child: _loading
