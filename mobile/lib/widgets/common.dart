@@ -23,9 +23,9 @@ class GradientHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: AppColors.brandGradient,
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
       ),
       child: SafeArea(
         bottom: false,
@@ -119,7 +119,7 @@ class SectionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadius.card),
-        boxShadow: softShadow(),
+        border: Border.all(color: AppColors.line),
       ),
       child: Padding(
         padding: padding,

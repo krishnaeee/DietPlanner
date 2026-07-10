@@ -213,7 +213,7 @@ class _LogWeightSheetState extends State<_LogWeightSheet> {
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _save(),
-            style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink),
+            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink),
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.monitor_weight_rounded, size: 20),
               suffixText: 'kg',

@@ -56,7 +56,7 @@ void main() {
     });
 
     await tester.pumpWidget(MaterialApp(
-      theme: AppTheme.light(),
+      theme: AppTheme.build(Brightness.dark),
       home: ProgressScreen(stored: _stored()),
     ));
     await tester.pumpAndSettle();
@@ -68,7 +68,7 @@ void main() {
   testWidgets('Logging a weight rebuilds without error', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(MaterialApp(
-      theme: AppTheme.light(),
+      theme: AppTheme.build(Brightness.dark),
       home: ProgressScreen(stored: _stored()),
     ));
     await tester.pumpAndSettle();

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/diet_plan.dart';
@@ -124,6 +125,11 @@ class PlanStorage {
   static const _base = 'saved_plans_v2';
   static const _legacySingle = 'saved_plan_v1';
 
+  /// Bumped on every write. Screens (e.g. the home list) listen to this and
+  /// reload, so a plan created/updated in the background — even after the
+  /// creating screen was popped — appears without a manual refresh or restart.
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
   // Per-user storage key (falls back to the shared base when logged out).
   static String get _key {
     final email = AuthService.instance.email;
@@ -190,6 +196,7 @@ class PlanStorage {
   static Future<void> _saveList(List<StoredPlan> plans) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, jsonEncode(plans.map((e) => e.toJson()).toList()));
+    revision.value++; // notify listeners (home list) that storage changed
   }
 
   static Future<void> upsert(StoredPlan p) async {

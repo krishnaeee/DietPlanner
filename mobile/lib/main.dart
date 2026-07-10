@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'screens/auth_gate.dart';
 import 'services/app_router.dart';
 import 'services/notification_service.dart';
+import 'services/theme_controller.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -13,6 +14,8 @@ void main() async {
     statusBarIconBrightness: Brightness.light,
     statusBarBrightness: Brightness.dark,
   ));
+  // Restore the saved light/dark preference before the first frame.
+  await ThemeController.instance.load();
   // Initialize the notification plugin + timezones (no permission prompt yet —
   // that happens when the user opts into reminders).
   await NotificationService.instance.init();
@@ -36,12 +39,20 @@ class DietPlannerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'AI Diet Planner',
-      debugShowCheckedModeBanner: false,
-      navigatorKey: appNavigatorKey,
-      theme: AppTheme.light(),
-      home: const AuthGate(),
+    // Rebuild the whole app when the light/dark preference changes, keeping
+    // AppColors.brightness in lockstep with the ThemeData.
+    return AnimatedBuilder(
+      animation: ThemeController.instance,
+      builder: (context, _) {
+        AppColors.brightness = ThemeController.instance.brightness;
+        return MaterialApp(
+          title: 'AI Diet Planner',
+          debugShowCheckedModeBanner: false,
+          navigatorKey: appNavigatorKey,
+          theme: AppTheme.build(AppColors.brightness),
+          home: const AuthGate(),
+        );
+      },
     );
   }
 }

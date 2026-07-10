@@ -476,7 +476,7 @@ class _Retry extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.cloud_off_rounded, color: AppColors.inkFaint, size: 40),
+          Icon(Icons.cloud_off_rounded, color: AppColors.inkFaint, size: 40),
           const SizedBox(height: 12),
           const Text("Couldn't load plans"),
           const SizedBox(height: 12),

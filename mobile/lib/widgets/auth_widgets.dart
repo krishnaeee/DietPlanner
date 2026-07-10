@@ -59,7 +59,7 @@ class AuthField extends StatelessWidget {
           enableSuggestions: false,
           textInputAction:
               onSubmitted != null ? TextInputAction.done : TextInputAction.next,
-          style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
+          style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
           decoration: InputDecoration(
             hintText: hint,
             prefixIcon: Icon(icon, size: 20),
@@ -110,7 +110,7 @@ class OrDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Expanded(child: Divider(color: AppColors.line)),
+        Expanded(child: Divider(color: AppColors.line)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Text('or',
@@ -119,7 +119,7 @@ class OrDivider extends StatelessWidget {
                   .bodySmall
                   ?.copyWith(color: AppColors.inkFaint, fontWeight: FontWeight.w700)),
         ),
-        const Expanded(child: Divider(color: AppColors.line)),
+        Expanded(child: Divider(color: AppColors.line)),
       ],
     );
   }
@@ -147,7 +147,7 @@ class GoogleSignInButton extends StatelessWidget {
         label: const Text('Continue with Google'),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.ink,
-          side: const BorderSide(color: AppColors.line),
+          side: BorderSide(color: AppColors.line),
           padding: const EdgeInsets.symmetric(vertical: 14),
           textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.field)),

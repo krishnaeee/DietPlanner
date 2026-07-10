@@ -1,25 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/billing.dart';
-import '../services/auth_service.dart';
 import '../services/billing_service.dart';
-import '../services/notification_service.dart';
-import '../services/plan_storage.dart';
-import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import 'paywall_screen.dart';
 import 'plan_screen.dart';
 
-class InputScreen extends StatefulWidget {
-  const InputScreen({super.key});
+/// The plan-generation form. Reached from the home's "New plan" / add button.
+/// On generate it replaces itself with the [PlanScreen], so backing out of the
+/// plan returns to the home list.
+class AddPlanScreen extends StatefulWidget {
+  const AddPlanScreen({super.key});
 
   @override
-  State<InputScreen> createState() => _InputScreenState();
+  State<AddPlanScreen> createState() => _AddPlanScreenState();
 }
 
-class _InputScreenState extends State<InputScreen> {
+class _AddPlanScreenState extends State<AddPlanScreen> {
   final _formKey = GlobalKey<FormState>();
 
   // Pre-filled defaults for quick testing. Clear these for production.
@@ -36,105 +34,20 @@ class _InputScreenState extends State<InputScreen> {
   String _sex = 'male'; // male | female | other
   String _activity = 'light'; // sedentary ... very_active
 
-  List<StoredPlan> _plans = []; // previously generated plans
-
   @override
   void initState() {
     super.initState();
     // Refresh the live goal indicator as weights change.
     _weight.addListener(_refresh);
     _targetWeight.addListener(_refresh);
-    _initForUser();
   }
 
   void _refresh() => setState(() {});
-
-  /// On (re)entering the home for a logged-in account: load that account's plans
-  /// and re-sync reminders to them (clearing any previous user's). Runs once per
-  /// login since the home is rebuilt by the auth gate on each sign-in.
-  Future<void> _initForUser() async {
-    final list = await PlanStorage.loadAll();
-    if (!mounted) return;
-    setState(() => _plans = list);
-    await NotificationService.instance.rescheduleAll(list);
-    BillingService.instance.refresh(); // load credit balance for the header chip
-  }
 
   void _openPaywall() {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const PaywallScreen()),
     );
-  }
-
-  Future<void> _loadSaved() async {
-    final list = await PlanStorage.loadAll();
-    if (mounted) setState(() => _plans = list);
-  }
-
-  void _openPlan(StoredPlan p) {
-    Navigator.of(context)
-        .push(MaterialPageRoute(
-          builder: (_) => PlanScreen(stored: p, location: p.location),
-        ))
-        .then((_) => _loadSaved());
-  }
-
-  Future<void> _renamePlan(StoredPlan p) async {
-    final ctrl = TextEditingController(text: p.name);
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rename plan'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(hintText: 'e.g. Wife'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    ctrl.dispose();
-    if (name != null && name.isNotEmpty) {
-      await PlanStorage.rename(p.id, name);
-      _loadSaved();
-    }
-  }
-
-  Future<void> _deletePlan(StoredPlan p) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete plan?'),
-        content: Text('Delete "${p.name}" and its reminders? This can\'t be undone.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE0573E)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await PlanStorage.delete(p.id);
-    await TrackingStorage.remove(p.id); // drop this plan's tracking data too
-    // Rebuild reminders for the remaining plans (drops the deleted one's).
-    final all = await PlanStorage.loadAll();
-    final counts = await NotificationService.instance.rescheduleAll(all);
-    for (final q in all) {
-      final c = counts[q.id] ?? 0;
-      if (q.scheduledCount != c) await PlanStorage.upsert(q.copyWith(scheduledCount: c));
-    }
-    _loadSaved();
   }
 
   @override
@@ -190,15 +103,16 @@ class _InputScreenState extends State<InputScreen> {
       if (_dietPref.text.trim().isNotEmpty) 'dietaryPreference': _dietPref.text.trim(),
     };
 
-    Navigator.of(context)
-        .push(MaterialPageRoute(
-          builder: (_) => PlanScreen(
-            requestBody: body,
-            location: _location.text.trim(),
-            planName: _planName.text.trim(),
-          ),
-        ))
-        .then((_) => _loadSaved());
+    // Replace this form with the plan so backing out of the plan lands on home.
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => PlanScreen(
+          requestBody: body,
+          location: _location.text.trim(),
+          planName: _planName.text.trim(),
+        ),
+      ),
+    );
   }
 
   ({String label, Color color, IconData icon})? get _goal {
@@ -225,18 +139,10 @@ class _InputScreenState extends State<InputScreen> {
     return Scaffold(
       body: Column(
         children: [
-          GradientHeader(
-            title: 'AI Diet Planner',
+          const GradientHeader(
+            title: 'New plan',
             subtitle: 'Tell us a little about you and we\'ll build a day-by-day plan with food local to you.',
-            badge: const _LeafBadge(),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _CreditChip(onTap: _openPaywall),
-                const SizedBox(width: 8),
-                _AccountMenu(onPlans: _openPaywall),
-              ],
-            ),
+            showBack: true,
           ),
           Expanded(
             child: Form(
@@ -244,15 +150,6 @@ class _InputScreenState extends State<InputScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
                 children: [
-                  if (_plans.isNotEmpty) ...[
-                    _SavedPlansSection(
-                      plans: _plans,
-                      onOpen: _openPlan,
-                      onRename: _renamePlan,
-                      onDelete: _deletePlan,
-                    ),
-                    const SizedBox(height: 16),
-                  ],
                   SectionCard(
                     title: 'Who is this for?',
                     icon: Icons.badge_outlined,
@@ -481,13 +378,7 @@ class _InputScreenState extends State<InputScreen> {
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: AppColors.bg,
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF13351F).withValues(alpha: 0.06),
-              blurRadius: 18,
-              offset: const Offset(0, -6),
-            ),
-          ],
+          border: Border(top: BorderSide(color: AppColors.line)),
         ),
         child: SafeArea(
           top: false,
@@ -499,102 +390,6 @@ class _InputScreenState extends State<InputScreen> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _LeafBadge extends StatelessWidget {
-  const _LeafBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: const Icon(Icons.eco_rounded, color: Colors.white, size: 24),
-    );
-  }
-}
-
-/// A tappable balance pill in the header: "3" credits or "∞" when unlimited.
-/// Rebuilds whenever the billing balance changes.
-class _CreditChip extends StatelessWidget {
-  final VoidCallback onTap;
-  const _CreditChip({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<Entitlements>(
-      valueListenable: BillingService.instance.entitlements,
-      builder: (context, ent, _) {
-        final unlimited = ent.subscriptionActive;
-        return Material(
-          color: Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    unlimited ? Icons.all_inclusive_rounded : Icons.stars_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    unlimited ? 'Unlimited' : '${ent.credits}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// Header account menu: shows the signed-in email, Plans & credits, and Log out.
-class _AccountMenu extends StatelessWidget {
-  final VoidCallback onPlans;
-  const _AccountMenu({required this.onPlans});
-
-  @override
-  Widget build(BuildContext context) {
-    final email = AuthService.instance.email ?? '';
-    return PopupMenuButton<String>(
-      icon: const Icon(Icons.account_circle_rounded, color: Colors.white),
-      onSelected: (v) async {
-        if (v == 'plans') {
-          onPlans();
-        } else if (v == 'logout') {
-          // Clear this user's pending reminders before switching accounts.
-          await NotificationService.instance.cancelAll();
-          await AuthService.instance.logout();
-        }
-      },
-      itemBuilder: (_) => [
-        if (email.isNotEmpty)
-          PopupMenuItem<String>(
-            enabled: false,
-            child: Text(email, style: const TextStyle(fontWeight: FontWeight.w600)),
-          ),
-        const PopupMenuItem<String>(value: 'plans', child: Text('Plans & credits')),
-        const PopupMenuItem<String>(value: 'logout', child: Text('Log out')),
-      ],
     );
   }
 }
@@ -636,12 +431,12 @@ class _LabeledField extends StatelessWidget {
               : null,
           textCapitalization:
               capitalize ? TextCapitalization.words : TextCapitalization.none,
-          style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
+          style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
           decoration: InputDecoration(
             hintText: hint,
             prefixIcon: icon != null ? Icon(icon, size: 20) : null,
             suffixText: suffix,
-            suffixStyle: const TextStyle(
+            suffixStyle: TextStyle(
               color: AppColors.inkMuted,
               fontWeight: FontWeight.w700,
             ),
@@ -685,17 +480,9 @@ class _PillToggle<T> extends StatelessWidget {
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOut,
                 decoration: BoxDecoration(
-                  color: sel ? Colors.white : Colors.transparent,
+                  color: sel ? AppColors.surfaceHigh : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
-                  boxShadow: sel
-                      ? [
-                          BoxShadow(
-                            color: const Color(0xFF13351F).withValues(alpha: 0.10),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ]
-                      : null,
+                  border: sel ? Border.all(color: AppColors.line) : null,
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -804,140 +591,7 @@ class _GoalBanner extends StatelessWidget {
   }
 }
 
-/// "Your plans" list shown at the top of the form.
-class _SavedPlansSection extends StatelessWidget {
-  final List<StoredPlan> plans;
-  final void Function(StoredPlan) onOpen;
-  final void Function(StoredPlan) onRename;
-  final void Function(StoredPlan) onDelete;
-  const _SavedPlansSection({
-    required this.plans,
-    required this.onOpen,
-    required this.onRename,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 10),
-          child: Text('Your plans',
-              style: text.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-        ),
-        ...plans.map((p) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _PlanCard(
-                plan: p,
-                onOpen: () => onOpen(p),
-                onRename: () => onRename(p),
-                onDelete: () => onDelete(p),
-              ),
-            )),
-      ],
-    );
-  }
-}
-
-/// A saved-plan row: tap to open, ⋮ menu to rename/delete.
-class _PlanCard extends StatelessWidget {
-  final StoredPlan plan;
-  final VoidCallback onOpen;
-  final VoidCallback onRename;
-  final VoidCallback onDelete;
-  const _PlanCard({
-    required this.plan,
-    required this.onOpen,
-    required this.onRename,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final loc = plan.location.trim();
-    final sub = loc.isEmpty
-        ? '${plan.plan.plannedDays}-day plan'
-        : '${plan.plan.plannedDays}-day plan · $loc';
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        onTap: onOpen,
-        child: Ink(
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadius.card),
-            boxShadow: softShadow(),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: AppColors.brand.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(Icons.restaurant_menu_rounded, color: AppColors.brand),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(plan.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: text.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 2),
-                      Text(sub, style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
-                      if (plan.remindersScheduled) ...[
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const Icon(Icons.notifications_active_rounded,
-                                size: 14, color: AppColors.brand),
-                            const SizedBox(width: 4),
-                            Text('Reminders on',
-                                style: text.labelSmall?.copyWith(
-                                    color: AppColors.brand, fontWeight: FontWeight.w700)),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert_rounded, color: AppColors.inkMuted),
-                  onSelected: (v) {
-                    if (v == 'open') onOpen();
-                    if (v == 'rename') onRename();
-                    if (v == 'delete') onDelete();
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'open', child: Text('Open')),
-                    PopupMenuItem(value: 'rename', child: Text('Rename')),
-                    PopupMenuItem(value: 'delete', child: Text('Delete')),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The gradient primary button used as the sticky CTA.
+/// The gradient primary button used as the sticky CTA (also reused on home).
 class PrimaryButton extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -954,15 +608,8 @@ class PrimaryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        gradient: AppColors.brandGradient,
+        gradient: AppColors.ctaGradient,
         borderRadius: BorderRadius.circular(AppRadius.field),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.brand.withValues(alpha: 0.35),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
       child: Material(
         color: Colors.transparent,

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/diet_plan.dart';
 import '../models/tracking.dart';
@@ -12,6 +13,7 @@ import '../services/plan_storage.dart';
 import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'diet_settings_screen.dart';
 import 'grocery_list_screen.dart';
 import 'paywall_screen.dart';
 import 'progress_screen.dart';
@@ -444,9 +446,9 @@ class _PlanViewState extends State<_PlanView> {
 
   late StoredPlan _sp;
   late DietPlan _plan; // grows as the user loads more weeks
-  bool _busy = false;
   bool _extending = false; // a "load next week" generation is in flight
   int? _swapping; // meal index (on the selected day) currently being swapped
+  bool _reminderPromptDismissed = false; // hides the "set reminders" nudge
   PlanTracking _tracking = PlanTracking();
 
   final ScrollController _scroll = ScrollController();
@@ -454,8 +456,6 @@ class _PlanViewState extends State<_PlanView> {
   int? _highlight; // meal index to highlight (from a tapped notification)
 
   bool get _scheduled => _sp.remindersScheduled;
-  bool get _repeat => _sp.repeatForever;
-  int get _count => _sp.scheduledCount;
   DateTime get _start => _sp.startDate;
 
   /// Calendar date of a given day number (Day 1 == [_start]).
@@ -495,11 +495,34 @@ class _PlanViewState extends State<_PlanView> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _revealHighlighted());
     }
     _loadTracking();
+    _loadPromptDismissed();
   }
 
   Future<void> _loadTracking() async {
     final t = await TrackingStorage.load(_sp.id);
     if (mounted) setState(() => _tracking = t);
+  }
+
+  static const _promptDismissKey = 'reminder_prompt_dismissed';
+
+  /// Restores whether this plan's "set reminders" nudge was dismissed before.
+  Future<void> _loadPromptDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids = prefs.getStringList(_promptDismissKey) ?? const [];
+    if (ids.contains(_sp.id) && mounted) {
+      setState(() => _reminderPromptDismissed = true);
+    }
+  }
+
+  /// Hides the nudge and remembers it per-plan so it doesn't return on reopen.
+  Future<void> _dismissReminderPrompt() async {
+    setState(() => _reminderPromptDismissed = true);
+    final prefs = await SharedPreferences.getInstance();
+    final ids = prefs.getStringList(_promptDismissKey) ?? <String>[];
+    if (!ids.contains(_sp.id)) {
+      ids.add(_sp.id);
+      await prefs.setStringList(_promptDismissKey, ids);
+    }
   }
 
   Future<void> _toggleMeal(int dayIndex, int mealIndex) async {
@@ -561,6 +584,34 @@ class _PlanViewState extends State<_PlanView> {
         .then((_) => _loadTracking()); // weight/water may have changed
   }
 
+  void _openSettings() {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => DietSettingsScreen(stored: _sp)))
+        .then((_) => _reloadStored()); // reminder state may have changed
+  }
+
+  /// Opens the grocery list for the currently selected day (with a toggle there
+  /// to expand to the whole upcoming week).
+  void _openDayGrocery() {
+    final days = _plan.days;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => GroceryListScreen(
+        plan: _plan,
+        startIndex: _selected,
+        windowDays: math.min(7, days.length - _selected),
+        startInDayMode: true,
+      ),
+    ));
+  }
+
+  /// Re-reads this plan's stored record (e.g. after settings changed reminders)
+  /// so later actions here don't clobber those changes with a stale copy.
+  Future<void> _reloadStored() async {
+    final all = await PlanStorage.loadAll();
+    final fresh = all.firstWhere((e) => e.id == _sp.id, orElse: () => _sp);
+    if (mounted) setState(() => _sp = fresh);
+  }
+
   /// Scrolls the tapped meal into view, holds the highlight briefly, then clears.
   Future<void> _revealHighlighted() async {
     final ctx = _mealKey.currentContext;
@@ -597,10 +648,21 @@ class _PlanViewState extends State<_PlanView> {
           title: 'Your diet plan',
           subtitle: sub,
           showBack: true,
-          trailing: _HeaderAction(
-            icon: Icons.insights_rounded,
-            label: 'Progress',
-            onTap: _openProgress,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _HeaderAction(
+                icon: Icons.insights_rounded,
+                label: 'Progress',
+                onTap: _openProgress,
+              ),
+              const SizedBox(width: 8),
+              _HeaderIconButton(
+                icon: Icons.tune_rounded,
+                tooltip: 'Diet settings',
+                onTap: _openSettings,
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -666,10 +728,18 @@ class _PlanViewState extends State<_PlanView> {
                     isDone: (m) => _tracking.isMealDone(_selected, m),
                     onToggle: (m) => _toggleMeal(_selected, m),
                     onSwap: _swapMeal,
+                    onGrocery: _openDayGrocery,
                   ),
                 ),
                 const SizedBox(height: 20),
                 _extendSection(plan, text),
+                if (!_scheduled && !_reminderPromptDismissed) ...[
+                  const SizedBox(height: 16),
+                  _ReminderPromptCard(
+                    onSet: _openSettings,
+                    onDismiss: _dismissReminderPrompt,
+                  ),
+                ],
               ] else
                 Padding(
                   padding: const EdgeInsets.only(top: 40),
@@ -682,7 +752,6 @@ class _PlanViewState extends State<_PlanView> {
             ],
           ),
         ),
-        if (days.isNotEmpty) _reminderBar(),
       ],
     );
   }
@@ -867,173 +936,6 @@ class _PlanViewState extends State<_PlanView> {
     }
   }
 
-  // ─────────────────────────────────────────────────────── reminder bar UI ──
-
-  Widget _reminderBar() {
-    final text = Theme.of(context).textTheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF13351F).withValues(alpha: 0.06),
-            blurRadius: 18,
-            offset: const Offset(0, -6),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        minimum: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        child: _busy
-            ? const SizedBox(
-                height: 52,
-                child: Center(child: CircularProgressIndicator()),
-              )
-            : _scheduled
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: AppColors.brand.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(Icons.notifications_active_rounded,
-                                color: AppColors.brand),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Reminders on',
-                                    style: text.titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w800)),
-                                Text('$_count set · Day 1 ${_fmtDate(_start)}',
-                                    style: text.bodySmall
-                                        ?.copyWith(color: AppColors.inkMuted)),
-                              ],
-                            ),
-                          ),
-                          TextButton(
-                              onPressed: _turnOff, child: const Text('Turn off')),
-                        ],
-                      ),
-                      const Divider(height: 8),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        value: _repeat,
-                        onChanged: _toggleRepeat,
-                        activeThumbColor: AppColors.brand,
-                        title: Text('Repeat after plan ends',
-                            style:
-                                text.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                        subtitle: Text(
-                          'Keep daily reminders going by cycling the menu',
-                          style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _setupReminders,
-                          icon: const Icon(Icons.notifications_active_rounded),
-                          label: const Text('Set daily reminders'),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Grocery alert at 7 PM the day before + meal-time alarms',
-                        textAlign: TextAlign.center,
-                        style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
-                      ),
-                    ],
-                  ),
-      ),
-    );
-  }
-
-  Future<void> _setupReminders() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final start = await _pickStart();
-    if (start == null) return;
-
-    setState(() => _busy = true);
-    final allowed = await NotificationService.instance.requestPermissions();
-    if (!allowed) {
-      if (!mounted) return;
-      setState(() => _busy = false);
-      messenger.showSnackBar(const SnackBar(
-        content: Text('Allow notifications for this app to receive reminders.'),
-      ));
-      return;
-    }
-
-    // Mark this plan active with the chosen start, then rebuild all reminders
-    // (so other people's plans keep their reminders too).
-    await PlanStorage.upsert(_sp.copyWith(remindersScheduled: true, startDate: start));
-    var refreshed = await _rescheduleAndRefresh();
-    if (refreshed.scheduledCount == 0) {
-      // Nothing was in the future — flip it back off.
-      refreshed = refreshed.copyWith(remindersScheduled: false);
-      await PlanStorage.upsert(refreshed);
-    }
-    if (!mounted) return;
-    setState(() {
-      _sp = refreshed;
-      _busy = false;
-    });
-    messenger.showSnackBar(SnackBar(
-      content: Text(refreshed.scheduledCount > 0
-          ? 'Reminders set — ${refreshed.scheduledCount} notifications. Day 1: ${_fmtDate(start)}.'
-          : 'No upcoming times left to schedule — try starting tomorrow.'),
-    ));
-  }
-
-  Future<void> _turnOff() async {
-    final messenger = ScaffoldMessenger.of(context);
-    setState(() => _busy = true);
-    await PlanStorage.upsert(_sp.copyWith(remindersScheduled: false));
-    final refreshed = await _rescheduleAndRefresh();
-    if (!mounted) return;
-    setState(() {
-      _sp = refreshed;
-      _busy = false;
-    });
-    messenger.showSnackBar(const SnackBar(content: Text('Reminders turned off.')));
-  }
-
-  /// Toggles whether reminders keep cycling the menu after the plan's last day,
-  /// then reschedules so the change takes effect immediately.
-  Future<void> _toggleRepeat(bool on) async {
-    final messenger = ScaffoldMessenger.of(context);
-    setState(() => _busy = true);
-    await PlanStorage.upsert(_sp.copyWith(repeatForever: on));
-    final refreshed = await _rescheduleAndRefresh();
-    if (!mounted) return;
-    setState(() {
-      _sp = refreshed;
-      _busy = false;
-    });
-    messenger.showSnackBar(SnackBar(
-      content: Text(on
-          ? 'Reminders will keep repeating after the plan ends.'
-          : 'Reminders will stop after the last plan day.'),
-    ));
-  }
-
   /// Reschedules notifications for every active plan and re-reads this plan's
   /// updated record (with its fresh scheduled count).
   Future<StoredPlan> _rescheduleAndRefresh() async {
@@ -1048,49 +950,6 @@ class _PlanViewState extends State<_PlanView> {
     final fresh = await PlanStorage.loadAll();
     return fresh.firstWhere((e) => e.id == _sp.id, orElse: () => _sp);
   }
-
-  Future<DateTime?> _pickStart() {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final tomorrow = today.add(const Duration(days: 1));
-    return showModalBottomSheet<DateTime>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('When does Day 1 start?',
-                    style: Theme.of(ctx)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w800)),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.event_rounded, color: AppColors.brand),
-              title: const Text('Tomorrow'),
-              subtitle: const Text('Grocery alert tonight at 7 PM, meals from tomorrow'),
-              onTap: () => Navigator.pop(ctx, tomorrow),
-            ),
-            ListTile(
-              leading: const Icon(Icons.today_rounded, color: AppColors.brand),
-              title: const Text('Today'),
-              subtitle: const Text("Meals from today (times already passed are skipped)"),
-              onTap: () => Navigator.pop(ctx, today),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _fmtDate(DateTime d) => _fullDate(d);
 }
 
 class _SummaryCard extends StatelessWidget {
@@ -1148,16 +1007,80 @@ class _SummaryCard extends StatelessWidget {
             ],
           ),
           if (plan.summary.isNotEmpty) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             const Divider(),
-            const SizedBox(height: 16),
-            Text(
-              plan.summary,
-              style: text.bodyMedium?.copyWith(height: 1.5, color: AppColors.ink),
+            _Collapsible(
+              initiallyExpanded: true,
+              title: Text('About this plan',
+                  style: text.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+              child: Text(
+                plan.summary,
+                style: text.bodyMedium?.copyWith(height: 1.5, color: AppColors.ink),
+              ),
             ),
           ],
         ],
       ),
+    );
+  }
+}
+
+/// A tappable header with a chevron that expands/collapses [child] with a
+/// smooth size+fade animation. Used to fold the plan summary and each meal's
+/// ingredient list so the plan view stays compact.
+class _Collapsible extends StatefulWidget {
+  final Widget title;
+  final Widget child;
+  final bool initiallyExpanded;
+  const _Collapsible({
+    required this.title,
+    required this.child,
+    this.initiallyExpanded = true,
+  });
+
+  @override
+  State<_Collapsible> createState() => _CollapsibleState();
+}
+
+class _CollapsibleState extends State<_Collapsible> {
+  late bool _open = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _open = !_open),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                Expanded(child: widget.title),
+                AnimatedRotation(
+                  turns: _open ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.keyboard_arrow_down_rounded,
+                      color: AppColors.inkMuted),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: widget.child,
+          ),
+          secondChild: const SizedBox(width: double.infinity),
+          crossFadeState:
+              _open ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+          duration: const Duration(milliseconds: 220),
+          sizeCurve: Curves.easeOut,
+        ),
+      ],
     );
   }
 }
@@ -1215,10 +1138,121 @@ class _GroceryListButton extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.inkFaint),
+              Icon(Icons.chevron_right_rounded, color: AppColors.inkFaint),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Slim link inside a day's detail: opens that day's grocery list.
+class _DayGroceryLink extends StatelessWidget {
+  final VoidCallback onTap;
+  const _DayGroceryLink({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Material(
+      color: AppColors.brand.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              const Icon(Icons.shopping_cart_rounded,
+                  color: AppColors.brand, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Groceries for this day',
+                    style: text.bodyMedium?.copyWith(
+                        color: AppColors.brandDark, fontWeight: FontWeight.w700)),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.brand),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A dismissible nudge shown at the bottom of a plan when reminders aren't set.
+class _ReminderPromptCard extends StatelessWidget {
+  final VoidCallback onSet;
+  final VoidCallback onDismiss;
+  const _ReminderPromptCard({required this.onSet, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.brand.withValues(alpha: 0.4)),
+        boxShadow: softShadow(opacity: 0.05, blur: 14, y: 6),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.brand.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.notifications_active_rounded,
+                    color: AppColors.brand),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Get daily reminders?',
+                        style: text.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text(
+                      'A grocery alert the evening before + meal-time alarms.',
+                      style:
+                          text.bodySmall?.copyWith(color: AppColors.inkMuted),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onSet,
+                  icon: const Icon(Icons.notifications_active_rounded, size: 18),
+                  label: const Text('Set reminders'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              TextButton(onPressed: onDismiss, child: const Text('Not now')),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'You can turn this off anytime in Diet settings.',
+            style: text.bodySmall?.copyWith(color: AppColors.inkFaint),
+          ),
+        ],
       ),
     );
   }
@@ -1388,6 +1422,7 @@ class _DayDetail extends StatelessWidget {
   final bool Function(int meal) isDone;
   final void Function(int meal) onToggle;
   final void Function(int meal) onSwap;
+  final VoidCallback onGrocery;
   const _DayDetail({
     super.key,
     required this.day,
@@ -1400,6 +1435,7 @@ class _DayDetail extends StatelessWidget {
     required this.isDone,
     required this.onToggle,
     required this.onSwap,
+    required this.onGrocery,
   });
 
   @override
@@ -1498,6 +1534,8 @@ class _DayDetail extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        _DayGroceryLink(onTap: onGrocery),
         if (plan.hasMacros) ...[
           const SizedBox(height: 14),
           _MacroBars(day: day, plan: plan),
@@ -1731,39 +1769,42 @@ class _MealCard extends StatelessWidget {
               ),
             ],
             if (meal.ingredients.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Text(
-                'INGREDIENTS',
-                style: text.labelSmall?.copyWith(
-                  color: AppColors.inkFaint,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.6,
+              const SizedBox(height: 6),
+              _Collapsible(
+                initiallyExpanded: false,
+                title: Text(
+                  'INGREDIENTS (${meal.ingredients.length})',
+                  style: text.labelSmall?.copyWith(
+                    color: AppColors.inkFaint,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: meal.ingredients.map((ing) {
-                  final label = ing.quantity.isEmpty
-                      ? ing.name
-                      : '${ing.name} · ${ing.quantity}';
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: AppColors.fieldFill,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.line),
-                    ),
-                    child: Text(
-                      label,
-                      style: text.bodySmall?.copyWith(
-                        color: AppColors.ink,
-                        fontWeight: FontWeight.w600,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: meal.ingredients.map((ing) {
+                    final label = ing.quantity.isEmpty
+                        ? ing.name
+                        : '${ing.name} · ${ing.quantity}';
+                    return Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: AppColors.fieldFill,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.line),
                       ),
-                    ),
-                  );
-                }).toList(),
+                      child: Text(
+                        label,
+                        style: text.bodySmall?.copyWith(
+                          color: AppColors.ink,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
               ),
             ],
           ],
@@ -1851,6 +1892,35 @@ class _MealCheck extends StatelessWidget {
 }
 
 /// A pill button in the gradient header (e.g. "Progress").
+/// A compact icon-only pill in the gradient header (e.g. the settings gear).
+class _HeaderIconButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  const _HeaderIconButton(
+      {required this.icon, required this.tooltip, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.18),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Tooltip(
+          message: tooltip,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(icon, color: Colors.white, size: 20),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HeaderAction extends StatelessWidget {
   final IconData icon;
   final String label;

@@ -1,7 +1,8 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -20,6 +21,13 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
+
+  /// App-level master switch for meal/grocery reminders across ALL plans. When
+  /// off, no plan schedules meal/grocery alarms regardless of its own setting.
+  /// (Water/hydration reminders are independent of this.) Persisted; the
+  /// settings screen listens to it.
+  final ValueNotifier<bool> remindersEnabled = ValueNotifier<bool>(true);
+  static const _enabledKey = 'reminders_enabled_v1';
 
   /// Set before runApp. Invoked when a notification is tapped while the app is
   /// running (foreground, or background but still alive). Cold-start taps are
@@ -48,6 +56,13 @@ class NotificationService {
     if (_ready || kIsWeb) {
       _ready = true;
       return;
+    }
+    // Restore the master reminders switch (default on).
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      remindersEnabled.value = prefs.getBool(_enabledKey) ?? true;
+    } catch (_) {
+      // Prefs unavailable — leave the default (on).
     }
     tzdata.initializeTimeZones();
     try {
@@ -137,13 +152,32 @@ class NotificationService {
     final counts = <String, int>{};
     for (final sp in plans) {
       var count = 0;
-      if (sp.remindersScheduled) count += await _scheduleOne(sp, now);
-      // Hydration reminders are independent of meal/grocery reminders.
+      // Meal/grocery reminders require BOTH the plan's own flag and the global
+      // master switch to be on.
+      if (sp.remindersScheduled && remindersEnabled.value) {
+        count += await _scheduleOne(sp, now);
+      }
+      // Hydration reminders are independent of the meal/grocery master switch.
       final tracking = await TrackingStorage.load(sp.id);
       if (tracking.waterRemindersOn) count += await _scheduleWater(sp, now);
       if (count > 0) counts[sp.id] = count;
     }
     return counts;
+  }
+
+  /// Flips the app-level master switch for meal/grocery reminders and reschedules
+  /// every plan under the new setting (turning it off cancels them all; turning
+  /// it on re-arms each plan that has its own reminders enabled).
+  Future<void> setRemindersEnabled(bool on) async {
+    if (remindersEnabled.value == on) return;
+    remindersEnabled.value = on;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_enabledKey, on);
+    } catch (_) {
+      // Best-effort persistence.
+    }
+    await refreshAll();
   }
 
   /// Reschedules reminders for every saved plan and writes back each plan's

@@ -18,14 +18,18 @@ class GroceryListScreen extends StatefulWidget {
   /// Index into [plan.days] to start the window at (the day being viewed).
   final int startIndex;
 
-  /// How many days the list covers.
+  /// How many days the "whole week" option covers from [startIndex].
   final int windowDays;
+
+  /// Open showing just the anchor day (vs the whole [windowDays] window).
+  final bool startInDayMode;
 
   const GroceryListScreen({
     super.key,
     required this.plan,
     this.startIndex = 0,
     this.windowDays = 7,
+    this.startInDayMode = false,
   });
 
   @override
@@ -33,18 +37,43 @@ class GroceryListScreen extends StatefulWidget {
 }
 
 class _GroceryListScreenState extends State<GroceryListScreen> {
-  late final List<DayPlan> _window;
-  late final List<_Item> _items;
+  late int _start; // anchor day index (clamped)
+  late bool _wholeWeek; // true → windowDays; false → just the anchor day
+  List<DayPlan> _window = [];
+  List<_Item> _items = [];
   final Set<String> _checked = {};
 
   @override
   void initState() {
     super.initState();
     final days = widget.plan.days;
-    final start = widget.startIndex.clamp(0, days.isEmpty ? 0 : days.length - 1);
-    final end = (start + widget.windowDays).clamp(0, days.length);
-    _window = days.sublist(start, end);
+    _start = widget.startIndex.clamp(0, days.isEmpty ? 0 : days.length - 1);
+    // Start in week mode unless asked for a single day (or only one day is left).
+    _wholeWeek = !widget.startInDayMode && _weekCount > 1;
+    _recompute();
+  }
+
+  /// How many days the "whole week" option would actually cover from the anchor.
+  int get _weekCount {
+    final remaining = widget.plan.days.length - _start;
+    return remaining.clamp(0, widget.windowDays);
+  }
+
+  void _recompute() {
+    final days = widget.plan.days;
+    final count = _wholeWeek ? _weekCount : 1;
+    final end = (_start + count).clamp(0, days.length);
+    _window = days.sublist(_start, end);
     _items = _aggregate(_window);
+  }
+
+  void _setWholeWeek(bool whole) {
+    if (_wholeWeek == whole) return;
+    setState(() {
+      _wholeWeek = whole;
+      _checked.clear(); // the item set changes, so drop the tick state
+      _recompute();
+    });
   }
 
   int get _firstDay => _window.isEmpty ? 0 : _window.first.day;
@@ -59,8 +88,9 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 
   Future<void> _copyToClipboard() async {
     final messenger = ScaffoldMessenger.of(context);
-    final buffer = StringBuffer()
-      ..writeln('Grocery list · Day $_firstDay–$_lastDay');
+    final label =
+        _window.length == 1 ? 'Day $_firstDay' : 'Day $_firstDay–$_lastDay';
+    final buffer = StringBuffer()..writeln('Grocery list · $label');
     for (final item in _items) {
       buffer.writeln(
           '• ${item.name}${item.quantity.isEmpty ? '' : ' — ${item.quantity}'}');
@@ -96,6 +126,15 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                     onTap: _copyToClipboard,
                   ),
           ),
+          if (_weekCount > 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+              child: _ScopeToggle(
+                wholeWeek: _wholeWeek,
+                weekCount: _weekCount,
+                onChanged: _setWholeWeek,
+              ),
+            ),
           Expanded(
             child: _items.isEmpty
                 ? _EmptyState(text: text)
@@ -395,6 +434,61 @@ class _EmptyState extends StatelessWidget {
               style: text.bodyMedium?.copyWith(color: AppColors.inkMuted),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Segmented control switching the list between the anchor day and the week.
+class _ScopeToggle extends StatelessWidget {
+  final bool wholeWeek;
+  final int weekCount;
+  final ValueChanged<bool> onChanged;
+  const _ScopeToggle({
+    required this.wholeWeek,
+    required this.weekCount,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.fieldFill,
+        borderRadius: BorderRadius.circular(AppRadius.field),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(
+        children: [
+          _seg('This day', !wholeWeek, () => onChanged(false)),
+          _seg('$weekCount days', wholeWeek, () => onChanged(true)),
+        ],
+      ),
+    );
+  }
+
+  Widget _seg(String label, bool sel, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: sel ? AppColors.brand : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+              color: sel ? Colors.white : AppColors.inkMuted,
+            ),
+          ),
         ),
       ),
     );
