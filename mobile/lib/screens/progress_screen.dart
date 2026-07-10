@@ -131,22 +131,22 @@ class _ProgressScreenState extends State<ProgressScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                     children: [
                       _WeightCard(
                         stored: _sp,
                         tracking: _t,
                         onLog: _logWeight,
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 14),
                       Row(
                         children: [
                           Expanded(child: _StreakCard(stored: _sp, tracking: _t)),
-                          const SizedBox(width: 16),
+                          const SizedBox(width: 14),
                           Expanded(child: _AdherenceCard(stored: _sp, tracking: _t)),
                         ],
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 14),
                       _WaterCard(
                         tracking: _t,
                         busy: _busy,

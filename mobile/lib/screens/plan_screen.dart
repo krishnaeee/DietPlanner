@@ -1551,7 +1551,7 @@ class _DayDetail extends StatelessWidget {
           final hi = m == highlightIndex;
           return Padding(
             key: hi ? mealKey : null,
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: 14),
             child: _MealCard(
               meal: day.meals[m],
               highlight: hi,
@@ -1706,15 +1706,15 @@ class _MealCard extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  width: 42,
-                  height: 42,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(AppColors.iconForMeal(meal.name), color: color, size: 22),
+                  child: Icon(AppColors.iconForMeal(meal.name), color: color, size: 19),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 13),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
