@@ -526,8 +526,40 @@ class _PlanViewState extends State<_PlanView> {
         context: context,
         builder: (_) => const _ReminderPromptDialog(),
       );
-      if (set == true && mounted) _openSettings();
+      if (set == true && mounted) _enableAllReminders();
     });
+  }
+
+  /// One tap from the post-generation prompt: turns on meal + grocery reminders
+  /// (with the repeat cycle) AND water reminders for this plan — no settings
+  /// detour, no start-date question. Uses the plan's own start date (today for a
+  /// fresh plan).
+  Future<void> _enableAllReminders() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final allowed = await NotificationService.instance.requestPermissions();
+    if (!mounted) return;
+    if (!allowed) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Allow notifications for this app to receive reminders.'),
+      ));
+      return;
+    }
+    // Meal/grocery reminders + repeat on the plan; water reminders in tracking.
+    await PlanStorage.upsert(
+        _sp.copyWith(remindersScheduled: true, repeatForever: true));
+    final t = await TrackingStorage.load(_sp.id);
+    final nextTracking = t.copyWith(waterRemindersOn: true);
+    await TrackingStorage.save(_sp.id, nextTracking);
+
+    final refreshed = await _rescheduleAndRefresh();
+    if (!mounted) return;
+    setState(() {
+      _sp = refreshed;
+      _tracking = nextTracking;
+    });
+    messenger.showSnackBar(const SnackBar(
+      content: Text('All reminders on — meals, groceries, repeat & water.'),
+    ));
   }
 
   Future<void> _toggleMeal(int dayIndex, int mealIndex) async {
@@ -1211,19 +1243,25 @@ class _ReminderPromptDialog extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Center(
-              child: Text('Stay on track with reminders?',
+              child: Text('Turn on all reminders?',
                   textAlign: TextAlign.center,
                   style: text.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
             ),
             const SizedBox(height: 12),
-            _bullet(context, Icons.shopping_cart_rounded,
-                'A grocery alert at 7 PM the evening before each day, so you can shop ahead.'),
-            const SizedBox(height: 10),
             _bullet(context, Icons.restaurant_rounded,
                 'A gentle alarm at each meal time so you never miss one.'),
+            const SizedBox(height: 10),
+            _bullet(context, Icons.shopping_cart_rounded,
+                'A grocery alert the evening before each day, so you can shop ahead.'),
+            const SizedBox(height: 10),
+            _bullet(context, Icons.water_drop_rounded,
+                'Hydration nudges through the day to hit your water goal.'),
+            const SizedBox(height: 10),
+            _bullet(context, Icons.autorenew_rounded,
+                'Keeps going after the plan ends by cycling the menu.'),
             const SizedBox(height: 16),
             Text(
-              'You can change or turn these off anytime in the plan\'s Diet settings.',
+              'One tap turns it all on. Change or turn off anytime in the plan\'s Diet settings.',
               style: text.bodySmall?.copyWith(color: AppColors.inkMuted, height: 1.4),
             ),
             const SizedBox(height: 20),
@@ -1232,7 +1270,7 @@ class _ReminderPromptDialog extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed: () => Navigator.of(context).pop(true),
                 icon: const Icon(Icons.notifications_active_rounded, size: 18),
-                label: const Text('Set reminders'),
+                label: const Text('Turn on reminders'),
               ),
             ),
             const SizedBox(height: 4),
