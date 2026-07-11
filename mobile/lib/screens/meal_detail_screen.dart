@@ -111,50 +111,68 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
     return Scaffold(
       body: Column(
         children: [
-          FreshHeader(title: meal.name.isEmpty ? 'Meal' : meal.name, showBack: true),
+          FreshHeader(
+            title: meal.name.isEmpty ? 'Meal' : meal.name,
+            subtitle: meal.time.isEmpty ? null : meal.time,
+            showBack: true,
+          ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 28),
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 28),
               children: [
-                // hero
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(AppRadius.card),
-                  ),
-                  child: Row(
+                // The dish floats as a lit orb over a violet haze.
+                SizedBox(
+                  height: 168,
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(24),
+                            gradient: RadialGradient(
+                              center: const Alignment(0.2, -0.4),
+                              radius: 1.1,
+                              colors: [
+                                AppColors.violet.withValues(
+                                    alpha: AppColors.brightness == Brightness.dark
+                                        ? 0.22
+                                        : 0.14),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                       Container(
-                        width: 58,
-                        height: 58,
+                        width: 108,
+                        height: 108,
                         decoration: BoxDecoration(
-                          color: color.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(16),
+                          shape: BoxShape.circle,
+                          gradient: const RadialGradient(
+                            center: Alignment(-0.35, -0.4),
+                            colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
+                          ),
+                          boxShadow: coralGlow(opacity: 0.45, blur: 44, y: 16),
                         ),
                         child: Icon(AppColors.iconForMeal(meal.name),
-                            color: color, size: 30),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(meal.dish.isEmpty ? meal.name : meal.dish,
-                                style: text.titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w900, height: 1.15)),
-                            const SizedBox(height: 3),
-                            Text(
-                              '${meal.time.isEmpty ? meal.name : meal.time}'
-                              '${meal.calories > 0 ? ' · ${meal.calories} kcal' : ''}',
-                              style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
-                            ),
-                          ],
-                        ),
+                            color: Colors.white, size: 48),
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(height: 14),
+                Text(meal.dish.isEmpty ? meal.name : meal.dish,
+                    style: text.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.4,
+                        height: 1.15)),
+                if (meal.calories > 0) ...[
+                  const SizedBox(height: 3),
+                  Text('${meal.calories} kcal',
+                      style: text.bodySmall?.copyWith(
+                          color: color, fontWeight: FontWeight.w800)),
+                ],
 
                 if (meal.protein > 0 || meal.carbs > 0 || meal.fat > 0) ...[
                   const SizedBox(height: 16),
@@ -183,45 +201,64 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.8)),
                   const SizedBox(height: 10),
-                  ...meal.ingredients.map((ing) => Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          leading: Icon(Icons.check_circle_outline_rounded,
-                              color: AppColors.brand.withValues(alpha: 0.6), size: 20),
-                          title: Text(ing.name,
-                              style: text.bodyLarge
-                                  ?.copyWith(fontWeight: FontWeight.w600)),
-                          trailing: ing.quantity.isEmpty
-                              ? null
-                              : Text(ing.quantity,
+                  ...meal.ingredients.map((ing) => Container(
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        decoration: BoxDecoration(
+                          border: Border(
+                              bottom: BorderSide(color: AppColors.line)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: const BoxDecoration(
+                                  color: AppColors.brand, shape: BoxShape.circle),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(ing.name,
                                   style: text.bodyMedium
-                                      ?.copyWith(color: AppColors.inkMuted)),
+                                      ?.copyWith(fontWeight: FontWeight.w700)),
+                            ),
+                            if (ing.quantity.isNotEmpty)
+                              Text(ing.quantity,
+                                  style: text.bodySmall?.copyWith(
+                                      color: AppColors.inkMuted,
+                                      fontWeight: FontWeight.w700)),
+                          ],
                         ),
                       )),
                 ],
                 const SizedBox(height: 22),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _swapping ? null : _swap,
-                    icon: _swapping
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.autorenew_rounded, size: 18),
-                    label: Text(_swapping ? 'Finding a new dish…' : 'Swap this meal'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.brandDark,
-                      side: BorderSide(color: AppColors.brand.withValues(alpha: 0.5)),
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadius.field)),
-                    ),
-                  ),
-                ),
+                _swapping
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(AppRadius.field),
+                          border: Border.all(color: AppColors.line),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(
+                                width: 17,
+                                height: 17,
+                                child: CircularProgressIndicator(strokeWidth: 2)),
+                            const SizedBox(width: 10),
+                            Text('Finding a new dish…',
+                                style: text.titleSmall?.copyWith(
+                                    color: AppColors.inkMuted,
+                                    fontWeight: FontWeight.w800)),
+                          ],
+                        ),
+                      )
+                    : GradientButton(
+                        label: 'Swap this meal',
+                        icon: Icons.autorenew_rounded,
+                        onPressed: _swap,
+                      ),
                 const SizedBox(height: 6),
                 Text('Swapping is free and keeps a similar calorie budget.',
                     textAlign: TextAlign.center,

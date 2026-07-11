@@ -152,10 +152,10 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Column(
         children: [
           FreshHeader(
-            title: 'Your plans',
+            title: 'Plans',
             subtitle: _plans.isEmpty
                 ? null
-                : '${_plans.length} plan${_plans.length == 1 ? '' : 's'}',
+                : '${_plans.length} plan${_plans.length == 1 ? '' : 's'} on track',
             actions: [
               _CreditChip(onTap: _openPaywall),
               HeaderCircleButton(
@@ -188,10 +188,21 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: _plans.isEmpty
           ? null // the empty state has its own prominent CTA
-          : FloatingActionButton.extended(
-              onPressed: _addPlan,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('New plan'),
+          : Container(
+              decoration: BoxDecoration(
+                gradient: AppColors.ctaGradient,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: coralGlow(),
+              ),
+              child: FloatingActionButton.extended(
+                onPressed: _addPlan,
+                elevation: 0,
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('New plan',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+              ),
             ),
     );
   }
@@ -247,9 +258,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-/// The app-icon badge in the header. Doubles as the Settings entry point.
-/// A tappable balance pill in the header: "3" credits or "∞" when unlimited.
-/// Light Fresh styling (brand-tinted) to sit on the page ground.
+/// A glass balance pill in the header: "✦ 3" credits or "∞" when unlimited.
 class _CreditChip extends StatelessWidget {
   final VoidCallback onTap;
   const _CreditChip({required this.onTap});
@@ -261,31 +270,37 @@ class _CreditChip extends StatelessWidget {
       builder: (context, ent, _) {
         final unlimited = ent.subscriptionActive;
         return Material(
-          color: Colors.white.withValues(alpha: 0.2),
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(AppRadius.pill),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    unlimited ? Icons.all_inclusive_rounded : Icons.stars_rounded,
-                    color: Colors.white,
-                    size: 17,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    unlimited ? 'Unlimited' : '${ent.credits}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+                border: Border.all(color: AppColors.line),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      unlimited ? Icons.all_inclusive_rounded : Icons.stars_rounded,
+                      color: AppColors.brand,
+                      size: 16,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 5),
+                    Text(
+                      unlimited ? 'Unlimited' : '${ent.credits}',
+                      style: TextStyle(
+                        color: AppColors.ink,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -295,7 +310,8 @@ class _CreditChip extends StatelessWidget {
   }
 }
 
-/// A saved-plan row: tap to open, ⋮ menu to rename/delete.
+/// A Nocturne plan cover card: glass with a coloured aurora orb, the goal tag,
+/// journey progress, and the plan's meta. Tap to open, ⋮ to rename/delete.
 class _PlanCard extends StatelessWidget {
   final StoredPlan plan;
   final VoidCallback onOpen;
@@ -308,93 +324,206 @@ class _PlanCard extends StatelessWidget {
     required this.onDelete,
   });
 
+  static const _orbs = [
+    Color(0xFFFF4D6D), // coral
+    Color(0xFF8B7CFF), // violet
+    Color(0xFF4ADE9C), // mint
+    Color(0xFFFFB46B), // amber
+  ];
+
+  ({String label, Color color}) _goal() {
+    final g = plan.request?['goal'];
+    final orb = _orbs[plan.slot % _orbs.length];
+    if (g == 'lose') {
+      final s = plan.startWeightKg, t = plan.targetWeightKg;
+      final d = (s != null && t != null) ? ' −${(s - t).round()} KG' : '';
+      return (label: 'LOSE$d', color: orb);
+    }
+    if (g == 'gain') return (label: 'GAIN', color: orb);
+    if (g == 'maintain') return (label: 'EAT HEALTHY', color: orb);
+    // Older plans: infer from the stored weights.
+    final s = plan.startWeightKg, t = plan.targetWeightKg;
+    if (s != null && t != null && t < s) {
+      return (label: 'LOSE −${(s - t).round()} KG', color: orb);
+    }
+    if (s != null && t != null && t > s) return (label: 'GAIN', color: orb);
+    return (label: 'PLAN', color: orb);
+  }
+
+  /// 1-based journey day, clamped to the plan window; 0 while upcoming.
+  int _elapsedDay() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final s = DateTime(
+        plan.startDate.year, plan.startDate.month, plan.startDate.day);
+    final since = today.difference(s).inDays;
+    if (since < 0) return 0;
+    return (since + 1).clamp(1, plan.plan.days.length);
+  }
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final goal = _goal();
+    final total = plan.plan.days.length;
+    final day = _elapsedDay();
+    final pct = total <= 0 ? 0.0 : (day / total).clamp(0.0, 1.0);
     final loc = plan.location.trim();
-    final sub = loc.isEmpty
-        ? '${plan.plan.plannedDays}-day plan'
-        : '${plan.plan.plannedDays}-day plan · $loc';
+
     return Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(AppRadius.card),
+      borderRadius: BorderRadius.circular(22),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.card),
         onTap: onOpen,
         child: Ink(
           decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadius.card),
+            borderRadius: BorderRadius.circular(22),
             border: Border.all(color: AppColors.line),
-            boxShadow: softShadow(),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(15),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
+          child: Stack(
+            children: [
+              // The aurora orb, softly glowing from the top-right corner.
+              Positioned(
+                right: -34,
+                top: -46,
+                child: Container(
+                  width: 130,
+                  height: 130,
                   decoration: BoxDecoration(
-                    color: AppColors.brand.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.restaurant_menu_rounded,
-                      color: AppColors.brand, size: 21),
-                ),
-                const SizedBox(width: 13),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(plan.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: text.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 2),
-                      Text(sub, style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
-                      // Only advertise "Reminders on" when BOTH the plan's flag
-                      // and the app-level master switch are on.
-                      if (plan.remindersScheduled)
-                        ValueListenableBuilder<bool>(
-                          valueListenable:
-                              NotificationService.instance.remindersEnabled,
-                          builder: (context, masterOn, _) => masterOn
-                              ? Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.notifications_active_rounded,
-                                          size: 14, color: AppColors.brand),
-                                      const SizedBox(width: 4),
-                                      Text('Reminders on',
-                                          style: text.labelSmall?.copyWith(
-                                              color: AppColors.brand,
-                                              fontWeight: FontWeight.w700)),
-                                    ],
-                                  ),
-                                )
-                              : const SizedBox.shrink(),
-                        ),
+                    shape: BoxShape.circle,
+                    color: goal.color.withValues(
+                        alpha: AppColors.brightness == Brightness.dark ? 0.16 : 0.10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: goal.color.withValues(
+                            alpha: AppColors.brightness == Brightness.dark
+                                ? 0.45
+                                : 0.30),
+                        blurRadius: 70,
+                        spreadRadius: 12,
+                      ),
                     ],
                   ),
                 ),
-                PopupMenuButton<String>(
-                  icon: Icon(Icons.more_vert_rounded, color: AppColors.inkMuted),
-                  onSelected: (v) {
-                    if (v == 'open') onOpen();
-                    if (v == 'rename') onRename();
-                    if (v == 'delete') onDelete();
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'open', child: Text('Open')),
-                    PopupMenuItem(value: 'rename', child: Text('Rename')),
-                    PopupMenuItem(value: 'delete', child: Text('Delete')),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 8, 15),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(plan.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: text.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w900)),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: goal.color.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          child: Text(goal.label,
+                              style: text.labelSmall?.copyWith(
+                                  color: goal.color,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.6,
+                                  fontSize: 8.5)),
+                        ),
+                        PopupMenuButton<String>(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(Icons.more_vert_rounded,
+                              size: 19, color: AppColors.inkFaint),
+                          onSelected: (v) {
+                            if (v == 'open') onOpen();
+                            if (v == 'rename') onRename();
+                            if (v == 'delete') onDelete();
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'open', child: Text('Open')),
+                            PopupMenuItem(value: 'rename', child: Text('Rename')),
+                            PopupMenuItem(value: 'delete', child: Text('Delete')),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    RichText(
+                      text: TextSpan(
+                        style: text.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.8,
+                            color: AppColors.ink),
+                        children: [
+                          TextSpan(text: day == 0 ? 'Starts soon' : 'Day $day'),
+                          if (day > 0)
+                            TextSpan(
+                              text: '  of $total',
+                              style: text.bodySmall?.copyWith(
+                                  color: AppColors.inkMuted,
+                                  fontWeight: FontWeight.w700),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: pct,
+                          minHeight: 4,
+                          backgroundColor: AppColors.surfaceHigh,
+                          valueColor: AlwaysStoppedAnimation(goal.color),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            loc.isEmpty ? '$total-day plan' : '📍 $loc',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text.bodySmall?.copyWith(
+                                color: AppColors.inkMuted, fontSize: 11),
+                          ),
+                        ),
+                        if (plan.remindersScheduled)
+                          ValueListenableBuilder<bool>(
+                            valueListenable:
+                                NotificationService.instance.remindersEnabled,
+                            builder: (context, masterOn, _) => masterOn
+                                ? Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: Icon(Icons.notifications_active_rounded,
+                                        size: 13, color: AppColors.brand),
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Text(
+                            '${plan.plan.dailyCalorieTarget} kcal/day',
+                            style: text.bodySmall?.copyWith(
+                                color: AppColors.inkMuted,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 11),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

@@ -1,65 +1,76 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Central design system: colors, radii, spacing, shadows, and the ThemeData
-/// that ties them together. Every screen reads from here so the look stays
-/// cohesive.
+/// Central design system — the "Nocturne" language: OLED-black glass surfaces
+/// in dark (the identity), a cool near-white twin in light, one coral→violet
+/// gradient accent system, heavy geometric type, hairline borders.
 ///
-/// Visual language: dark, minimal, "UNIX"-style — near-black charcoal canvas,
-/// slightly lighter cards with large radii, thin type, big light-weight
-/// numbers, restrained accents, subtle hairline borders instead of shadows.
+/// Every screen reads from here so the look stays cohesive across modes.
 class AppColors {
   AppColors._();
 
   /// The active brightness. Set by the root before the theme is built; the
-  /// neutral getters below resolve against it so a light/dark toggle restyles
+  /// neutral getters below resolve against it so the theme toggle restyles
   /// every screen at once. Accents stay fixed across both modes.
   static Brightness brightness = Brightness.dark;
   static bool get _dark => brightness == Brightness.dark;
 
-  // Accents — same in both modes; chosen to read on white and near-black.
-  static const brand = Color(0xFF20B26E); // health green
-  static const brandDark = Color(0xFF1B8F58);
-  static const brandDeep = Color(0xFF14603F);
+  // ── Accents (same in both modes; chosen to read on white and black) ──
+  /// Coral — the primary accent ("brand" name kept so call sites don't churn).
+  static const brand = Color(0xFFFF5D6D);
+  static const brandDark = Color(0xFFE0485F);
+  static const brandDeep = Color(0xFFB23A4E);
 
-  // Energy accent (calories / highlights).
-  static const accent = Color(0xFFEF9B23);
+  /// Energy accent (calories / highlights) — warm amber.
+  static const accent = Color(0xFFF2A93B);
 
-  // Meal-type accents.
-  static const breakfast = Color(0xFFEF9B23);
-  static const lunch = Color(0xFF20B26E);
-  static const dinner = Color(0xFF5B7CFF);
-  static const snack = Color(0xFFB57BEA);
+  /// Secondary accent — violet (targets, fat macro).
+  static const violet = Color(0xFF8B7CFF);
 
-  // Neutrals — flip with [brightness].
-  static Color get bg => _dark ? const Color(0xFF0E1116) : const Color(0xFFF2F6F2);
-  static Color get surface => _dark ? const Color(0xFF171C23) : Colors.white;
+  // Meal-type accents (medium strength: legible on both grounds).
+  static const breakfast = Color(0xFFF2A040);
+  static const lunch = Color(0xFF2BB673);
+  static const dinner = Color(0xFF8B7CFF);
+  static const snack = Color(0xFFFF5E8A);
+
+  // ── Macro accents — flip with brightness for contrast ──
+  static Color get proteinAccent =>
+      _dark ? const Color(0xFF4ADE9C) : const Color(0xFF18B876);
+  static Color get carbsAccent =>
+      _dark ? const Color(0xFFFFB46B) : const Color(0xFFD98A1F);
+  static Color get fatAccent =>
+      _dark ? const Color(0xFFB3A9FF) : const Color(0xFF6E5DE6);
+
+  // ── Neutrals — flip with [brightness] ──
+  static Color get bg => _dark ? const Color(0xFF0B0D12) : const Color(0xFFF5F6FA);
+  static Color get surface => _dark ? const Color(0xFF14171F) : Colors.white;
   static Color get surfaceHigh =>
-      _dark ? const Color(0xFF1F2630) : const Color(0xFFEEF3EE);
-  static Color get ink => _dark ? const Color(0xFFECEEF2) : const Color(0xFF17241D);
+      _dark ? const Color(0xFF1C2029) : const Color(0xFFF0F1F6);
+  static Color get ink => _dark ? const Color(0xFFECEEF2) : const Color(0xFF15171D);
   static Color get inkMuted =>
-      _dark ? const Color(0xFF8B95A1) : const Color(0xFF6B7C72);
+      _dark ? const Color(0xFF8B93A1) : const Color(0xFF6A7079);
   static Color get inkFaint =>
-      _dark ? const Color(0xFF5A626E) : const Color(0xFF9AA9A0);
-  static Color get line => _dark ? const Color(0xFF272E38) : const Color(0xFFE4EDE6);
+      _dark ? const Color(0xFF5D6572) : const Color(0xFFA3A9B6);
+  static Color get line => _dark ? const Color(0xFF232833) : const Color(0xFFE6E8EF);
   static Color get fieldFill =>
-      _dark ? const Color(0xFF1C222B) : const Color(0xFFF6FAF6);
+      _dark ? const Color(0xFF1A1E27) : const Color(0xFFF0F1F6);
 
-  // Header/canvas gradient — quiet charcoal in dark, brand green in light.
-  static LinearGradient get brandGradient => LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: _dark
-            ? const [Color(0xFF20262F), Color(0xFF0E1116)]
-            : const [Color(0xFF27B277), Color(0xFF0F7A49)],
-      );
-
-  // Primary-action (CTA) gradient — the green, for buttons only.
+  /// The signature coral gradient — CTAs, progress fills, the auth header.
   static const ctaGradient = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [Color(0xFFFF7A59), Color(0xFFFF4D6D)],
+  );
+
+  /// Full accent sweep (ring arcs, selection borders): coral → violet.
+  static const auroraGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF2FC183), Color(0xFF1B8F58)],
+    colors: [Color(0xFFFF7A59), Color(0xFFFF4D6D), Color(0xFF8B7CFF)],
   );
+
+  /// Kept for the auth screens' branded header — same coral in both modes.
+  static LinearGradient get brandGradient => ctaGradient;
 
   /// Returns the accent color for a meal based on its name.
   static Color forMeal(String name) {
@@ -83,21 +94,31 @@ class AppColors {
 
 class AppRadius {
   AppRadius._();
-  static const card = 28.0; // large, UNIX-style
+  static const card = 20.0; // glass cards
   static const field = 16.0;
   static const chip = 30.0;
   static const pill = 40.0;
 }
 
-/// A soft, low-contrast elevation. Tinted and faint in light mode; on dark it
-/// barely registers (dark cards lean on hairline borders instead), so a heavy
-/// black drop shadow never leaks through when the theme flips.
+/// A soft, low-contrast elevation. On dark it barely registers (glass cards
+/// lean on hairline borders); on light it's a cool, faint drop.
 List<BoxShadow> softShadow({double opacity = 0.06, double blur = 24, double y = 12}) {
   final dark = AppColors.brightness == Brightness.dark;
-  final color = dark ? Colors.black : const Color(0xFF13351F);
+  final color = dark ? Colors.black : const Color(0xFF171A26);
   final a = dark ? (opacity * 0.5).clamp(0.0, 0.25) : opacity;
   return [
     BoxShadow(color: color.withValues(alpha: a), blurRadius: blur, offset: Offset(0, y)),
+  ];
+}
+
+/// The coral glow used under gradient CTAs and the ring.
+List<BoxShadow> coralGlow({double opacity = 0.35, double blur = 24, double y = 8}) {
+  return [
+    BoxShadow(
+      color: const Color(0xFFFF4D6D).withValues(alpha: opacity),
+      blurRadius: blur,
+      offset: Offset(0, y),
+    ),
   ];
 }
 
@@ -119,7 +140,8 @@ class AppTheme {
 
     final base = ThemeData(useMaterial3: true, colorScheme: scheme);
 
-    final textTheme = GoogleFonts.plusJakartaSansTextTheme(base.textTheme).apply(
+    // Manrope — the heavy geometric voice of Nocturne.
+    final textTheme = GoogleFonts.manropeTextTheme(base.textTheme).apply(
       bodyColor: AppColors.ink,
       displayColor: AppColors.ink,
     );

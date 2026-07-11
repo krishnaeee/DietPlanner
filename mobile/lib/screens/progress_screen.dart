@@ -393,7 +393,7 @@ class _WeightChartPainter extends CustomPainter {
     if (target != null) {
       final ty = y(target!);
       final tp = Paint()
-        ..color = AppColors.accent.withValues(alpha: 0.7)
+        ..color = AppColors.violet.withValues(alpha: 0.7) // dashed target
         ..strokeWidth = 1.5;
       for (double dx = 0; dx < size.width; dx += 10) {
         canvas.drawLine(Offset(dx, ty), Offset(dx + 5, ty), tp);

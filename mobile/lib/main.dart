@@ -45,6 +45,13 @@ class DietPlannerApp extends StatelessWidget {
       animation: ThemeController.instance,
       builder: (context, _) {
         AppColors.brightness = ThemeController.instance.brightness;
+        // Status-bar icons follow the mode (light icons on the dark canvas).
+        final dark = AppColors.brightness == Brightness.dark;
+        SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+          statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+        ));
         return MaterialApp(
           title: 'AI Diet Planner',
           debugShowCheckedModeBanner: false,
