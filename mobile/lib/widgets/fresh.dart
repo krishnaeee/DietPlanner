@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -231,19 +230,7 @@ class _RingPainter extends CustomPainter {
       colors: [Color(0xFFFF7A59), Color(0xFFFF4D6D), Color(0xFF8B7CFF)],
     ).createShader(rect);
 
-    // Soft glow under the arc, then the crisp arc on top.
-    canvas.drawArc(
-      rect,
-      -math.pi / 2,
-      sweep,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 11
-        ..strokeCap = StrokeCap.round
-        ..shader = shader
-        ..maskFilter = const ui.MaskFilter.blur(ui.BlurStyle.normal, 4),
-    );
+    // The crisp gradient arc — no glow.
     canvas.drawArc(
       rect,
       -math.pi / 2,

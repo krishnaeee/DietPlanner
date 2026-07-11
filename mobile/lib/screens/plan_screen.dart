@@ -731,6 +731,7 @@ class _PlanViewState extends State<_PlanView> {
                             alignment: Alignment.centerLeft,
                             child: FractionallySizedBox(
                               widthFactor: journeyPct == 0 ? 0.001 : journeyPct,
+                              heightFactor: 1, // fill the track's height
                               child: const DecoratedBox(
                                 decoration:
                                     BoxDecoration(gradient: AppColors.ctaGradient),

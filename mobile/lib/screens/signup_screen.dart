@@ -67,20 +67,26 @@ class _SignupScreenState extends State<SignupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(22, 12, 22, 24),
-            children: [
-              Align(
+        child: Column(
+          children: [
+            // Fixed header row — the back arrow must not scroll with the form.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Align(
                 alignment: Alignment.centerLeft,
                 child: HeaderCircleButton(
                   icon: Icons.arrow_back_rounded,
                   onTap: () => Navigator.of(context).maybePop(),
                 ),
               ),
-              const SizedBox(height: 4),
-              const AuthHero(
+            ),
+            Expanded(
+              child: Form(
+                key: _formKey,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+                  children: [
+                    const AuthHero(
                 title: 'Create account.',
                 subtitle: 'Sign up to start planning your meals.',
               ),
@@ -133,8 +139,11 @@ class _SignupScreenState extends State<SignupScreen> {
                 action: 'Log in',
                 onTap: _busy ? null : () => Navigator.of(context).maybePop(),
               ),
-            ],
-          ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

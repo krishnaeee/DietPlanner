@@ -203,6 +203,17 @@ class AppTheme {
         dragHandleColor: AppColors.line,
       ),
       dialogTheme: DialogThemeData(backgroundColor: AppColors.surface),
+      popupMenuTheme: PopupMenuThemeData(
+        color: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: AppColors.line),
+        ),
+        textStyle: textTheme.bodyMedium
+            ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w700),
+      ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppColors.surfaceHigh,

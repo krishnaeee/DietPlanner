@@ -212,12 +212,13 @@ class _DietSettingsScreenState extends State<DietSettingsScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, size: 18, color: AppColors.inkMuted),
           const SizedBox(width: 10),
           Text(label, style: text.bodyMedium?.copyWith(color: AppColors.inkMuted)),
-          const Spacer(),
-          Flexible(
+          const SizedBox(width: 12),
+          Expanded(
             child: Text(
               value,
               textAlign: TextAlign.right,

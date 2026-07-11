@@ -387,6 +387,7 @@ class _ProgressCard extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: FractionallySizedBox(
                     widthFactor: pct == 0 ? 0.001 : pct,
+                    heightFactor: 1, // fill the track's height
                     child: const DecoratedBox(
                       decoration:
                           BoxDecoration(gradient: AppColors.ctaGradient),

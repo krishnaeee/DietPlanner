@@ -363,6 +363,26 @@ class _PlanCard extends StatelessWidget {
     return (label: 'PLAN', color: orb);
   }
 
+  /// A Nocturne menu row: small icon + weighty label.
+  PopupMenuItem<String> _menuItem(String value, IconData icon, String label,
+      {Color? color}) {
+    return PopupMenuItem<String>(
+      value: value,
+      height: 42,
+      child: Row(
+        children: [
+          Icon(icon, size: 17, color: color ?? AppColors.inkMuted),
+          const SizedBox(width: 10),
+          Text(label,
+              style: TextStyle(
+                  color: color ?? AppColors.ink,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13.5)),
+        ],
+      ),
+    );
+  }
+
   /// 1-based journey day, clamped to the plan window; 0 while upcoming.
   int _elapsedDay() {
     final now = DateTime.now();
@@ -456,10 +476,12 @@ class _PlanCard extends StatelessWidget {
                             if (v == 'rename') onRename();
                             if (v == 'delete') onDelete();
                           },
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'open', child: Text('Open')),
-                            PopupMenuItem(value: 'rename', child: Text('Rename')),
-                            PopupMenuItem(value: 'delete', child: Text('Delete')),
+                          itemBuilder: (_) => [
+                            _menuItem('open', Icons.north_east_rounded, 'Open'),
+                            _menuItem('rename', Icons.edit_rounded, 'Rename'),
+                            _menuItem('delete', Icons.delete_outline_rounded,
+                                'Delete',
+                                color: AppColors.brandDark),
                           ],
                         ),
                       ],
