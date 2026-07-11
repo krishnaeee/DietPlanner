@@ -5,7 +5,7 @@ import { generatePlan, generateMeal, MAX_PLAN_DAYS } from './planService.js';
 import { describeProvider } from './providers.js';
 import { authRouter, requireAuth } from './auth.js';
 import { billingRouter, stripeWebhookHandler } from './billingRoutes.js';
-import { getEntitlements, spendCredits, addCredits } from './db.js';
+import { getEntitlements, spendCredits, addCredits, pool } from './db.js';
 import { BILLING_PROVIDER, CURRENCY } from './billing.js';
 
 const app = express();
@@ -124,8 +124,18 @@ function validate(body) {
   return errors.length ? { error: errors } : { value };
 }
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true, maxPlanDays: MAX_PLAN_DAYS });
+// Health check + keep-warm. The `SELECT 1` pokes Neon so the free-tier DB
+// (which auto-suspends after ~5 min idle) stays awake between cron-job.org
+// pings, not just the Render web service. Returns 503 if the DB is
+// unreachable so the pinger's failure alert doubles as DB monitoring.
+app.get('/health', async (_req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ ok: true, db: 'up', maxPlanDays: MAX_PLAN_DAYS });
+  } catch (err) {
+    console.error('[health] DB check failed:', err.message);
+    res.status(503).json({ ok: false, db: 'down', maxPlanDays: MAX_PLAN_DAYS });
+  }
 });
 
 app.post('/api/plan', requireAuth, async (req, res) => {
