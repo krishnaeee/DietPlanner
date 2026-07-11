@@ -309,7 +309,7 @@ class _RingPainter extends CustomPainter {
     canvas.drawCircle(center, r - 6, track);
 
     final shader = const SweepGradient(
-      colors: [Color(0x0027B277), AppColors.brand, AppColors.brandDark],
+      colors: [Color(0x00FF7A59), Color(0xFFFF7A59), AppColors.brand],
       stops: [0.0, 0.65, 1.0],
     ).createShader(rect);
     final arc = Paint()
@@ -1715,25 +1715,23 @@ class _MealCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final color = AppColors.forMeal(meal.name);
+    final mint = MacroColors.protein;
     final bg = highlight
         ? color.withValues(alpha: 0.06)
-        : (done ? AppColors.brand.withValues(alpha: 0.05) : AppColors.surface);
+        : (done ? mint.withValues(alpha: 0.05) : AppColors.surface);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOut,
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(AppRadius.card),
+        // Nocturne glass: a hairline defines every card; mint marks eaten,
+        // the meal colour marks a deep-link highlight.
         border: Border.all(
           color: highlight
               ? color
-              : (done ? AppColors.brand.withValues(alpha: 0.5) : Colors.transparent),
-          width: 2,
-        ),
-        boxShadow: softShadow(
-          opacity: highlight ? 0.16 : 0.05,
-          blur: highlight ? 26 : 18,
-          y: 8,
+              : (done ? mint.withValues(alpha: 0.45) : AppColors.line),
+          width: highlight ? 2 : 1,
         ),
       ),
       child: Padding(

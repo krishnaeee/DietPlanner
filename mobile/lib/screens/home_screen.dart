@@ -188,20 +188,33 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: _plans.isEmpty
           ? null // the empty state has its own prominent CTA
-          : Container(
+          : DecoratedBox(
               decoration: BoxDecoration(
                 gradient: AppColors.ctaGradient,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(99),
                 boxShadow: coralGlow(),
               ),
-              child: FloatingActionButton.extended(
-                onPressed: _addPlan,
-                elevation: 0,
-                backgroundColor: Colors.transparent,
-                foregroundColor: Colors.white,
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('New plan',
-                    style: TextStyle(fontWeight: FontWeight.w800)),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(99),
+                  onTap: _addPlan,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_rounded, color: Colors.white, size: 20),
+                        SizedBox(width: 6),
+                        Text('New plan',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 14)),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
     );
