@@ -53,7 +53,7 @@ class DietPlannerApp extends StatelessWidget {
           statusBarBrightness: dark ? Brightness.dark : Brightness.light,
         ));
         return MaterialApp(
-          title: 'AI Diet Planner',
+          title: 'ilAI',
           debugShowCheckedModeBanner: false,
           navigatorKey: appNavigatorKey,
           theme: AppTheme.build(AppColors.brightness),

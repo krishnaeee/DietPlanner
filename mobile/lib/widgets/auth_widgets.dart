@@ -133,6 +133,16 @@ class AuthHero extends StatelessWidget {
                 ),
                 child: const Icon(Icons.eco_rounded, color: Colors.white, size: 40),
               ),
+              // The AI spark, top-right of the orb — same as the launcher icon.
+              Transform.translate(
+                offset: const Offset(40, -36),
+                child: _AiSpark(
+                  size: 22,
+                  color: AppColors.brightness == Brightness.dark
+                      ? const Color(0xFFB3A9FF)
+                      : AppColors.violet,
+                ),
+              ),
             ],
           ),
         ),
@@ -147,6 +157,44 @@ class AuthHero extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The four-point AI spark from the launcher icon.
+class _AiSpark extends StatelessWidget {
+  final double size;
+  final Color color;
+  const _AiSpark({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.square(size),
+      painter: _SparkPainter(color),
+    );
+  }
+}
+
+class _SparkPainter extends CustomPainter {
+  final Color color;
+  const _SparkPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.width / 2;
+    final cx = r, cy = r;
+    const k = 0.22; // waist pinch — matches the icon's concave star
+    final path = Path()
+      ..moveTo(cx, cy - r)
+      ..quadraticBezierTo(cx + k * r, cy - k * r, cx + r, cy)
+      ..quadraticBezierTo(cx + k * r, cy + k * r, cx, cy + r)
+      ..quadraticBezierTo(cx - k * r, cy + k * r, cx - r, cy)
+      ..quadraticBezierTo(cx - k * r, cy - k * r, cx, cy - r)
+      ..close();
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SparkPainter old) => old.color != color;
 }
 
 /// A glass "working…" box shown in place of the CTA while busy.
