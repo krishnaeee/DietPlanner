@@ -120,27 +120,34 @@ class AuthHero extends StatelessWidget {
                   ),
                 ),
               ),
+              // The app mark — identical to the launcher icon: full coral
+              // gradient tile, white leaf, white three-star sparkle.
               Container(
-                width: 88,
-                height: 88,
+                width: 92,
+                height: 92,
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
+                  borderRadius: BorderRadius.circular(26),
                   gradient: const RadialGradient(
-                    center: Alignment(-0.35, -0.4),
+                    center: Alignment(-0.45, -0.55),
+                    radius: 1.35,
                     colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
                   ),
                   boxShadow: coralGlow(opacity: 0.20, blur: 16, y: 5),
                 ),
-                child: const Icon(Icons.eco_rounded, color: Colors.white, size: 40),
-              ),
-              // The AI spark, top-right of the orb — same as the launcher icon.
-              Transform.translate(
-                offset: const Offset(40, -36),
-                child: _AiSpark(
-                  size: 22,
-                  color: AppColors.brightness == Brightness.dark
-                      ? const Color(0xFFB3A9FF)
-                      : AppColors.violet,
+                child: Stack(
+                  children: [
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 4, right: 4),
+                        child:
+                            Icon(Icons.eco_rounded, color: Colors.white, size: 42),
+                      ),
+                    ),
+                    const Positioned.fill(
+                      child: CustomPaint(painter: _SparkClusterPainter()),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -159,42 +166,41 @@ class AuthHero extends StatelessWidget {
   }
 }
 
-/// The four-point AI spark from the launcher icon.
-class _AiSpark extends StatelessWidget {
-  final double size;
-  final Color color;
-  const _AiSpark({required this.size, required this.color});
+/// The white auto_awesome three-star cluster from the launcher icon —
+/// one big four-point star with two small trailing ones, top-right.
+/// Positions/radii are fractions of the tile width, taken from the icon art.
+class _SparkClusterPainter extends CustomPainter {
+  const _SparkClusterPainter();
 
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size.square(size),
-      painter: _SparkPainter(color),
-    );
-  }
-}
-
-class _SparkPainter extends CustomPainter {
-  final Color color;
-  const _SparkPainter(this.color);
+  static const _stars = [
+    (0.711, 0.275, 0.090), // big
+    (0.816, 0.191, 0.039), // small, upper
+    (0.826, 0.352, 0.029), // small, lower
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
-    final r = size.width / 2;
-    final cx = r, cy = r;
-    const k = 0.22; // waist pinch — matches the icon's concave star
-    final path = Path()
-      ..moveTo(cx, cy - r)
-      ..quadraticBezierTo(cx + k * r, cy - k * r, cx + r, cy)
-      ..quadraticBezierTo(cx + k * r, cy + k * r, cx, cy + r)
-      ..quadraticBezierTo(cx - k * r, cy + k * r, cx - r, cy)
-      ..quadraticBezierTo(cx - k * r, cy - k * r, cx, cy - r)
-      ..close();
-    canvas.drawPath(path, Paint()..color = color);
+    final w = size.width;
+    final paint = Paint()..color = Colors.white;
+    for (final (fx, fy, fr) in _stars) {
+      final cx = fx * w, cy = fy * w, r = fr * w;
+      final k = 0.3125 * r; // auto_awesome waist ratio
+      final path = Path()
+        ..moveTo(cx, cy - r)
+        ..lineTo(cx + k, cy - k)
+        ..lineTo(cx + r, cy)
+        ..lineTo(cx + k, cy + k)
+        ..lineTo(cx, cy + r)
+        ..lineTo(cx - k, cy + k)
+        ..lineTo(cx - r, cy)
+        ..lineTo(cx - k, cy - k)
+        ..close();
+      canvas.drawPath(path, paint);
+    }
   }
 
   @override
-  bool shouldRepaint(covariant _SparkPainter old) => old.color != color;
+  bool shouldRepaint(covariant _SparkClusterPainter old) => false;
 }
 
 /// A glass "working…" box shown in place of the CTA while busy.
