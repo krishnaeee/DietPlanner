@@ -11,25 +11,14 @@ import '../services/notification_service.dart';
 import '../services/plan_storage.dart';
 import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common.dart';
 import '../widgets/fresh.dart';
 import 'diet_settings_screen.dart';
 import 'grocery_list_screen.dart';
+import 'meal_detail_screen.dart';
 import 'paywall_screen.dart';
 import 'progress_screen.dart';
 
 const _kWeekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const _kMonths = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-];
-
-/// "5 Jun" — compact form for day-selector pills.
-String _shortDate(DateTime d) => '${d.day} ${_kMonths[d.month - 1]}';
-
-/// "Mon, 5 Jun" — full form for headers and reminder text.
-String _fullDate(DateTime d) =>
-    '${_kWeekdays[d.weekday - 1]}, ${d.day} ${_kMonths[d.month - 1]}';
 
 class PlanScreen extends StatefulWidget {
   /// Generate a new plan from [requestBody] (named [planName]), or open a saved
@@ -670,115 +659,212 @@ class _PlanViewState extends State<_PlanView> {
     super.dispose();
   }
 
+  /// Goal-ish subtitle: "Pollachi · vegetarian · 1,800 kcal/day".
+  String get _subtitle {
+    final parts = <String>[];
+    if (widget.location.trim().isNotEmpty) parts.add(widget.location.trim());
+    final pref = _sp.request?['dietaryPreference'];
+    if (pref is String && pref.trim().isNotEmpty) parts.add(pref.trim());
+    parts.add('${_plan.dailyCalorieTarget} kcal/day');
+    return parts.join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final plan = _plan;
     final text = Theme.of(context).textTheme;
     final days = plan.days;
-    final sub = widget.location.trim().isEmpty
-        ? '${plan.plannedDays}-day plan'
-        : '${plan.plannedDays}-day plan · ${widget.location.trim()}';
+    final selected = days.isEmpty ? 0 : _selected.clamp(0, days.length - 1);
 
-    return Column(
+    // Journey: how far into the requested period today is.
+    final elapsed = _todayIndex == null ? 0 : _todayIndex! + 1;
+    final journeyPct = plan.requestedDays <= 0
+        ? 0.0
+        : (elapsed / plan.requestedDays).clamp(0.0, 1.0);
+
+    return Stack(
       children: [
-        FreshHeader(
-          title: 'Your diet plan',
-          subtitle: sub,
-          showBack: true,
-          actions: [
-            if (!widget.embedded)
-              HeaderPill(
-                icon: Icons.insights_rounded,
-                label: 'Progress',
-                onTap: _openProgress,
+        Column(
+          children: [
+            FreshHeader(
+              title: '${plan.requestedDays}-day plan',
+              subtitle: _subtitle,
+              showBack: true,
+              actions: [
+                if (!widget.embedded)
+                  HeaderPill(
+                    icon: Icons.insights_rounded,
+                    label: 'Progress',
+                    onTap: _openProgress,
+                  ),
+                HeaderCircleButton(
+                  icon: Icons.tune_rounded,
+                  tooltip: 'Diet settings',
+                  onTap: _openSettings,
+                ),
+              ],
+            ),
+            // ── journey progress bar
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 2, 18, 0),
+              child: Row(
+                children: [
+                  Text(elapsed == 0 ? 'STARTS SOON' : 'DAY $elapsed',
+                      style: text.labelSmall?.copyWith(
+                          color: AppColors.inkMuted,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                          fontSize: 9)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: SizedBox(
+                        height: 4,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(color: AppColors.surfaceHigh),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: journeyPct == 0 ? 0.001 : journeyPct,
+                              child: const DecoratedBox(
+                                decoration:
+                                    BoxDecoration(gradient: AppColors.ctaGradient),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text('${(journeyPct * 100).round()}%',
+                      style: text.labelSmall?.copyWith(
+                          color: AppColors.inkMuted,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                          fontSize: 9)),
+                ],
               ),
-            HeaderCircleButton(
-              icon: Icons.tune_rounded,
-              tooltip: 'Diet settings',
-              onTap: _openSettings,
+            ),
+            Expanded(
+              child: ListView(
+                controller: _scroll,
+                padding: EdgeInsets.fromLTRB(
+                    18, 14, 18, widget.embedded ? 150 : 96),
+                children: [
+                  if (days.isNotEmpty) ...[
+                    _DateStrip(
+                      count: days.length,
+                      selected: selected,
+                      todayIndex: _todayIndex,
+                      dateForDay: _dateForDay,
+                      dayNumberAt: (i) => days[i].day,
+                      onSelect: (i) => setState(() {
+                        _selected = i;
+                        _highlight = null; // switching days cancels the highlight
+                      }),
+                    ),
+                    const SizedBox(height: 14),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 280),
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: SlideTransition(
+                          position:
+                              Tween(begin: const Offset(0, 0.03), end: Offset.zero)
+                                  .animate(anim),
+                          child: child,
+                        ),
+                      ),
+                      child: Column(
+                        key: ValueKey(selected),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _DayMacroChips(day: days[selected], plan: plan),
+                          const SizedBox(height: 14),
+                          ...List.generate(days[selected].meals.length, (m) {
+                            final hi = m == _highlight;
+                            return Padding(
+                              key: hi ? _mealKey : null,
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _PlanMealRow(
+                                meal: days[selected].meals[m],
+                                highlight: hi,
+                                done: _tracking.isMealDone(selected, m),
+                                swapping: _swapping == m,
+                                swapDisabled: _swapping != null,
+                                onToggle: () => _toggleMeal(selected, m),
+                                onSwap: () => _swapMeal(m),
+                                onTap: () =>
+                                    Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => MealDetailScreen(
+                                      stored: _sp,
+                                      dayIndex: selected,
+                                      mealIndex: m),
+                                )),
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _extendSection(plan, text),
+                    if (plan.summary.trim().isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _AboutPlan(summary: plan.summary.trim()),
+                    ],
+                  ] else
+                    Padding(
+                      padding: const EdgeInsets.only(top: 40),
+                      child: Text(
+                        'No daily meals were returned.',
+                        textAlign: TextAlign.center,
+                        style: text.bodyMedium?.copyWith(color: AppColors.inkMuted),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
         ),
-        Expanded(
-          child: ListView(
-            controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
-            children: [
-              _SummaryCard(plan: plan),
-              if (days.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _GroceryListButton(
-                  windowDays: math.min(7, days.length - _selected),
-                  onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => GroceryListScreen(
-                        plan: plan,
-                        startIndex: _selected,
-                        windowDays: 7,
-                      ),
-                    ));
-                  },
-                ),
-              ],
-              if (plan.truncated) ...[
-                const SizedBox(height: 12),
-                _InfoBanner(
-                  text: '${plan.days.length} of ${plan.requestedDays} days ready. '
-                      'Load the next week at the bottom to extend your plan.',
-                ),
-              ],
-              if (days.isNotEmpty) ...[
-                const SizedBox(height: 22),
-                _DaySelector(
-                  count: days.length,
-                  selected: _selected,
-                  todayIndex: _todayIndex,
-                  dateForDay: _dateForDay,
-                  onSelect: (i) => setState(() {
-                    _selected = i;
-                    _highlight = null; // switching days cancels the deep-link highlight
-                  }),
-                ),
-                const SizedBox(height: 18),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 280),
-                  transitionBuilder: (child, anim) => FadeTransition(
-                    opacity: anim,
-                    child: SlideTransition(
-                      position: Tween(begin: const Offset(0, 0.03), end: Offset.zero)
-                          .animate(anim),
-                      child: child,
+        // ── floating groceries pill (sits above the hub dock when embedded)
+        if (days.isNotEmpty)
+          Positioned(
+            right: 16,
+            bottom: widget.embedded ? 96 : 18,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: AppColors.ctaGradient,
+                borderRadius: BorderRadius.circular(99),
+                boxShadow: coralGlow(),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(99),
+                  onTap: _openDayGrocery,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.shopping_cart_rounded,
+                            color: Colors.white, size: 17),
+                        SizedBox(width: 6),
+                        Text('Groceries',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12.5)),
+                      ],
                     ),
                   ),
-                  child: _DayDetail(
-                    key: ValueKey(_selected),
-                    day: days[_selected.clamp(0, days.length - 1)],
-                    date: _dateForDay(days[_selected.clamp(0, days.length - 1)].day),
-                    isToday: _todayIndex == _selected,
-                    highlightIndex: _highlight,
-                    mealKey: _mealKey,
-                    plan: plan,
-                    swappingIndex: _swapping,
-                    isDone: (m) => _tracking.isMealDone(_selected, m),
-                    onToggle: (m) => _toggleMeal(_selected, m),
-                    onSwap: _swapMeal,
-                    onGrocery: _openDayGrocery,
-                  ),
                 ),
-                const SizedBox(height: 20),
-                _extendSection(plan, text),
-              ] else
-                Padding(
-                  padding: const EdgeInsets.only(top: 40),
-                  child: Text(
-                    'No daily meals were returned.',
-                    textAlign: TextAlign.center,
-                    style: text.bodyMedium?.copyWith(color: AppColors.inkMuted),
-                  ),
-                ),
-            ],
+              ),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -796,21 +882,23 @@ class _PlanViewState extends State<_PlanView> {
       // Nothing left to load. Show a done note only for multi-week journeys
       // (a short single-shot plan never needed extending).
       if (plan.requestedDays <= 7) return const SizedBox.shrink();
+      final mint = MacroColors.protein;
       return Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
-          color: AppColors.brand.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(AppRadius.card),
+          color: mint.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: mint.withValues(alpha: 0.35)),
         ),
         child: Row(
           children: [
-            const Icon(Icons.check_circle_rounded, color: AppColors.brand, size: 20),
+            Icon(Icons.check_circle_rounded, color: mint, size: 19),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 'Your full ${plan.requestedDays}-day plan is ready.',
                 style: text.bodyMedium
-                    ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w600),
+                    ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w700),
               ),
             ),
           ],
@@ -821,70 +909,52 @@ class _PlanViewState extends State<_PlanView> {
     if (_sp.request == null) return const SizedBox.shrink(); // can't extend
 
     final next = math.min(7, remaining);
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: AppColors.line),
-        boxShadow: softShadow(opacity: 0.05, blur: 14, y: 6),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.event_repeat_rounded,
-                    color: AppColors.accent, size: 24),
+    return Column(
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppRadius.field),
+            onTap: _extending ? null : _loadNextWeek,
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadius.field),
+                border: Border.all(
+                    color: AppColors.brand.withValues(alpha: 0.5), width: 1.5),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text('${plan.days.length} of ${plan.requestedDays} days ready',
-                        style:
-                            text.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 2),
-                    Text('$remaining days left to plan',
-                        style:
-                            text.bodySmall?.copyWith(color: AppColors.inkMuted)),
+                    if (_extending)
+                      const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                    else
+                      const Icon(Icons.add_rounded,
+                          color: AppColors.brand, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      _extending
+                          ? 'Building next $next days…'
+                          : 'Load next $next days',
+                      style: text.titleSmall?.copyWith(
+                          color: AppColors.brand, fontWeight: FontWeight.w800),
+                    ),
                   ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _extending ? null : _loadNextWeek,
-              icon: _extending
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.add_rounded),
-              label: Text(_extending
-                  ? 'Building next $next days…'
-                  : 'Load next $next days'),
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Uses 1 credit · free on Unlimited',
-            style: text.bodySmall?.copyWith(color: AppColors.inkFaint),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '${plan.days.length} of ${plan.requestedDays} days ready · 1 credit · free on Unlimited',
+          style: text.bodySmall?.copyWith(color: AppColors.inkFaint, fontSize: 11),
+        ),
+      ],
     );
   }
 
@@ -979,194 +1049,370 @@ class _PlanViewState extends State<_PlanView> {
   }
 }
 
-class _SummaryCard extends StatelessWidget {
-  final DietPlan plan;
-  const _SummaryCard({required this.plan});
+// ──────────────────────────────────────────────────────── date strip ──
+
+/// A horizontal calendar strip: weekday micro + day-of-month per plan day.
+/// Selected = coral pill; today = coral outline; past days tick in mint.
+class _DateStrip extends StatefulWidget {
+  final int count;
+  final int selected;
+  final int? todayIndex;
+  final DateTime Function(int dayNumber) dateForDay;
+  final int Function(int index) dayNumberAt;
+  final ValueChanged<int> onSelect;
+  const _DateStrip({
+    required this.count,
+    required this.selected,
+    required this.todayIndex,
+    required this.dateForDay,
+    required this.dayNumberAt,
+    required this.onSelect,
+  });
+
+  @override
+  State<_DateStrip> createState() => _DateStripState();
+}
+
+class _DateStripState extends State<_DateStrip> {
+  final _ctrl = ScrollController();
+  static const _w = 46.0; // item width incl. gap
+
+  @override
+  void initState() {
+    super.initState();
+    // Land with the selected date in view.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_ctrl.hasClients) return;
+      final target = (widget.selected * _w - 120)
+          .clamp(0.0, _ctrl.position.maxScrollExtent);
+      _ctrl.jumpTo(target);
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(16),
+    final mint = MacroColors.protein;
+    return SizedBox(
+      height: 56,
+      child: ListView.separated(
+        controller: _ctrl,
+        scrollDirection: Axis.horizontal,
+        itemCount: widget.count,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, i) {
+          final date = widget.dateForDay(widget.dayNumberAt(i));
+          final sel = i == widget.selected;
+          final isToday = widget.todayIndex == i;
+          final past = widget.todayIndex != null && i < widget.todayIndex!;
+          return GestureDetector(
+            onTap: () => widget.onSelect(i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              width: 40,
+              decoration: BoxDecoration(
+                color: sel ? AppColors.brand : Colors.transparent,
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(
+                  color: sel
+                      ? AppColors.brand
+                      : (isToday ? AppColors.brand : Colors.transparent),
                 ),
-                child: const Icon(Icons.local_fire_department_rounded,
-                    color: AppColors.accent, size: 30),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Daily calorie target',
-                        style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
-                    const SizedBox(height: 2),
-                    RichText(
-                      text: TextSpan(
-                        style: text.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.ink,
-                        ),
-                        children: [
-                          TextSpan(text: '${plan.dailyCalorieTarget}'),
-                          TextSpan(
-                            text: '  kcal',
-                            style: text.titleSmall?.copyWith(
-                              color: AppColors.inkMuted,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _kWeekdays[date.weekday - 1].toUpperCase().substring(0, 3),
+                    style: TextStyle(
+                      fontSize: 7.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                      color: sel
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : AppColors.inkFaint,
                     ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (plan.summary.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Divider(),
-            _Collapsible(
-              initiallyExpanded: true,
-              title: Text('About this plan',
-                  style: text.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-              child: Text(
-                plan.summary,
-                style: text.bodyMedium?.copyWith(height: 1.5, color: AppColors.ink),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${date.day}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: sel
+                          ? Colors.white
+                          : (past ? mint : AppColors.inkMuted),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ],
+          );
+        },
       ),
     );
   }
 }
 
-/// A tappable header with a chevron that expands/collapses [child] with a
-/// smooth size+fade animation. Used to fold the plan summary and each meal's
-/// ingredient list so the plan view stays compact.
-class _Collapsible extends StatefulWidget {
-  final Widget title;
-  final Widget child;
-  final bool initiallyExpanded;
-  const _Collapsible({
-    required this.title,
-    required this.child,
-    this.initiallyExpanded = true,
-  });
+// ─────────────────────────────────────────────── day macro summary ──
 
-  @override
-  State<_Collapsible> createState() => _CollapsibleState();
-}
-
-class _CollapsibleState extends State<_Collapsible> {
-  late bool _open = widget.initiallyExpanded;
+/// Four glass chips summarising the selected day: kcal · P · C · F.
+class _DayMacroChips extends StatelessWidget {
+  final DayPlan day;
+  final DietPlan plan;
+  const _DayMacroChips({required this.day, required this.plan});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    Widget chip(String value, String label, Color? color) {
+      final text = Theme.of(context).textTheme;
+      return Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: AppColors.line),
+          ),
+          child: Column(
+            children: [
+              Text(value,
+                  style: text.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: color ?? AppColors.ink,
+                      height: 1)),
+              const SizedBox(height: 3),
+              Text(label,
+                  style: text.labelSmall?.copyWith(
+                      color: AppColors.inkMuted,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.7,
+                      fontSize: 7.5)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Row(
       children: [
-        InkWell(
-          onTap: () => setState(() => _open = !_open),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                Expanded(child: widget.title),
-                AnimatedRotation(
-                  turns: _open ? 0.5 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Icon(Icons.keyboard_arrow_down_rounded,
-                      color: AppColors.inkMuted),
-                ),
-              ],
-            ),
-          ),
-        ),
-        AnimatedCrossFade(
-          firstChild: Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: widget.child,
-          ),
-          secondChild: const SizedBox(width: double.infinity),
-          crossFadeState:
-              _open ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-          duration: const Duration(milliseconds: 220),
-          sizeCurve: Curves.easeOut,
-        ),
+        chip('${day.totalCalories}', 'KCAL', null),
+        const SizedBox(width: 7),
+        chip('${day.totalProtein}g', 'PROTEIN', MacroColors.protein),
+        const SizedBox(width: 7),
+        chip('${day.totalCarbs}g', 'CARBS', MacroColors.carbs),
+        const SizedBox(width: 7),
+        chip('${day.totalFat}g', 'FAT', MacroColors.fat),
       ],
     );
   }
 }
 
-/// Tappable card that opens the consolidated grocery list for the upcoming days.
-class _GroceryListButton extends StatelessWidget {
-  final int windowDays;
+// ─────────────────────────────────────────────────── meal row ──
+
+/// A compact glass meal row: icon, dish, time · kcal · macros, swap + check.
+/// Tap opens the full recipe page.
+class _PlanMealRow extends StatelessWidget {
+  final Meal meal;
+  final bool highlight;
+  final bool done;
+  final bool swapping;
+  final bool swapDisabled;
+  final VoidCallback onToggle;
+  final VoidCallback onSwap;
   final VoidCallback onTap;
-  const _GroceryListButton({required this.windowDays, required this.onTap});
+  const _PlanMealRow({
+    required this.meal,
+    required this.highlight,
+    required this.done,
+    required this.swapping,
+    required this.swapDisabled,
+    required this.onToggle,
+    required this.onSwap,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final label = windowDays <= 1
-        ? "This day's grocery list"
-        : 'Next $windowDays-day grocery list';
+    final color = AppColors.forMeal(meal.name);
+    final mint = MacroColors.protein;
+    final dark = AppColors.brightness == Brightness.dark;
+
+    final macros = (meal.protein > 0 || meal.carbs > 0 || meal.fat > 0)
+        ? ' · P${meal.protein} C${meal.carbs} F${meal.fat}'
+        : '';
+
+    return Material(
+      color: done ? mint.withValues(alpha: 0.05) : AppColors.surface,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: highlight
+                  ? color
+                  : (done ? mint.withValues(alpha: 0.45) : AppColors.line),
+              width: highlight ? 2 : 1,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(11),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceHigh,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(AppColors.iconForMeal(meal.name), color: color, size: 19),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(meal.dish.isEmpty ? meal.name : meal.dish,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w800, height: 1.15)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${meal.time.isEmpty ? meal.name : meal.time}'
+                        '${meal.calories > 0 ? ' · ${meal.calories} kcal' : ''}'
+                        '$macros',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.bodySmall
+                            ?.copyWith(color: AppColors.inkMuted, fontSize: 10.5),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // swap
+                Material(
+                  color: AppColors.surfaceHigh,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: (swapping || swapDisabled) ? null : onSwap,
+                    child: SizedBox(
+                      width: 30,
+                      height: 30,
+                      child: swapping
+                          ? const Padding(
+                              padding: EdgeInsets.all(7),
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(Icons.autorenew_rounded,
+                              size: 16,
+                              color: swapDisabled
+                                  ? AppColors.inkFaint
+                                  : AppColors.brand),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // check
+                GestureDetector(
+                  onTap: onToggle,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: done ? mint : Colors.transparent,
+                      shape: BoxShape.circle,
+                      border:
+                          Border.all(color: done ? mint : AppColors.line, width: 2),
+                    ),
+                    child: Icon(Icons.check_rounded,
+                        size: 16,
+                        color: done
+                            ? (dark ? const Color(0xFF062B1A) : Colors.white)
+                            : AppColors.inkFaint),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────── about card ──
+
+/// The AI's plan overview, collapsed to two lines with a "more" toggle.
+class _AboutPlan extends StatefulWidget {
+  final String summary;
+  const _AboutPlan({required this.summary});
+
+  @override
+  State<_AboutPlan> createState() => _AboutPlanState();
+}
+
+class _AboutPlanState extends State<_AboutPlan> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
     return Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(AppRadius.card),
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
-        child: Container(
+        onTap: () => setState(() => _open = !_open),
+        child: Ink(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.card),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.line),
-            boxShadow: softShadow(opacity: 0.05, blur: 14, y: 6),
           ),
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: AppColors.brand.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.shopping_cart_rounded,
-                    color: AppColors.brand, size: 24),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          child: Padding(
+            padding: const EdgeInsets.all(13),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Text(label,
-                        style: text.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 2),
-                    Text(
-                      'One deduped shopping list with combined quantities',
-                      style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
-                    ),
+                    const Icon(Icons.auto_awesome_rounded,
+                        color: AppColors.violet, size: 15),
+                    const SizedBox(width: 7),
+                    Text('ABOUT THIS PLAN',
+                        style: text.labelSmall?.copyWith(
+                            color: AppColors.inkFaint,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                            fontSize: 8.5)),
+                    const Spacer(),
+                    Icon(_open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                        color: AppColors.inkFaint, size: 18),
                   ],
                 ),
-              ),
-              Icon(Icons.chevron_right_rounded, color: AppColors.inkFaint),
-            ],
+                const SizedBox(height: 7),
+                Text(
+                  widget.summary,
+                  maxLines: _open ? null : 2,
+                  overflow: _open ? null : TextOverflow.ellipsis,
+                  style: text.bodySmall
+                      ?.copyWith(color: AppColors.inkMuted, height: 1.5),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1174,44 +1420,6 @@ class _GroceryListButton extends StatelessWidget {
   }
 }
 
-/// Slim link inside a day's detail: opens that day's grocery list.
-class _DayGroceryLink extends StatelessWidget {
-  final VoidCallback onTap;
-  const _DayGroceryLink({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Material(
-      color: AppColors.brand.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(14),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              const Icon(Icons.shopping_cart_rounded,
-                  color: AppColors.brand, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text('Groceries for this day',
-                    style: text.bodyMedium?.copyWith(
-                        color: AppColors.brandDark, fontWeight: FontWeight.w700)),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.brand),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Centered popup shown once, right after a plan is generated, offering to set
-/// reminders. Explains what they do and that they can be turned off later.
-/// Pops `true` if the user chose to set them.
 class _ReminderPromptDialog extends StatelessWidget {
   const _ReminderPromptDialog();
 
@@ -1302,636 +1510,3 @@ class _ReminderPromptDialog extends StatelessWidget {
   }
 }
 
-class _InfoBanner extends StatelessWidget {
-  final String text;
-  const _InfoBanner({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.accent.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline_rounded, color: AppColors.accent, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.ink,
-                    height: 1.4,
-                  ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DaySelector extends StatefulWidget {
-  final int count;
-  final int selected;
-  final int? todayIndex;
-  final DateTime Function(int dayNumber) dateForDay;
-  final ValueChanged<int> onSelect;
-  const _DaySelector({
-    required this.count,
-    required this.selected,
-    required this.todayIndex,
-    required this.dateForDay,
-    required this.onSelect,
-  });
-
-  @override
-  State<_DaySelector> createState() => _DaySelectorState();
-}
-
-class _DaySelectorState extends State<_DaySelector> {
-  static const double _pillWidth = 78;
-  static const double _gap = 8;
-
-  final ScrollController _ctrl = ScrollController();
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected());
-  }
-
-  @override
-  void didUpdateWidget(covariant _DaySelector old) {
-    super.didUpdateWidget(old);
-    if (old.selected != widget.selected) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected());
-    }
-  }
-
-  /// Centres the selected pill in the viewport (clamped to scroll bounds).
-  void _scrollToSelected() {
-    if (!_ctrl.hasClients) return;
-    const itemExtent = _pillWidth + _gap;
-    final viewport = _ctrl.position.viewportDimension;
-    final target = widget.selected * itemExtent - (viewport - itemExtent) / 2;
-    _ctrl.animateTo(
-      target.clamp(0.0, _ctrl.position.maxScrollExtent),
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOut,
-    );
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 60,
-      child: ListView.separated(
-        controller: _ctrl,
-        scrollDirection: Axis.horizontal,
-        itemCount: widget.count,
-        separatorBuilder: (_, _) => const SizedBox(width: _gap),
-        itemBuilder: (context, i) {
-          final sel = i == widget.selected;
-          final isToday = i == widget.todayIndex;
-          final dateColor = sel
-              ? Colors.white.withValues(alpha: 0.85)
-              : (isToday ? AppColors.accent : AppColors.inkMuted);
-          return GestureDetector(
-            onTap: () => widget.onSelect(i),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              width: _pillWidth,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: sel ? AppColors.brand : AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: sel
-                      ? AppColors.brand
-                      : (isToday ? AppColors.accent : AppColors.line),
-                  width: isToday && !sel ? 1.6 : 1,
-                ),
-                boxShadow: sel ? softShadow(opacity: 0.10, blur: 12, y: 6) : null,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    isToday ? 'Today' : 'Day ${i + 1}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13.5,
-                      color: sel
-                          ? Colors.white
-                          : (isToday ? AppColors.accent : AppColors.inkMuted),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _shortDate(widget.dateForDay(i + 1)),
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 11.5,
-                      color: dateColor,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _DayDetail extends StatelessWidget {
-  final DayPlan day;
-  final DateTime date;
-  final bool isToday;
-  final int? highlightIndex;
-  final Key? mealKey;
-  final DietPlan plan;
-  final int? swappingIndex;
-  final bool Function(int meal) isDone;
-  final void Function(int meal) onToggle;
-  final void Function(int meal) onSwap;
-  final VoidCallback onGrocery;
-  const _DayDetail({
-    super.key,
-    required this.day,
-    required this.date,
-    required this.isToday,
-    this.highlightIndex,
-    this.mealKey,
-    required this.plan,
-    this.swappingIndex,
-    required this.isDone,
-    required this.onToggle,
-    required this.onSwap,
-    required this.onGrocery,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final doneCount =
-        List.generate(day.meals.length, (m) => isDone(m)).where((d) => d).length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text('Day ${day.day}',
-                          style: text.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w800)),
-                      if (isToday) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppColors.accent,
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                          child: Text(
-                            'TODAY',
-                            style: text.labelSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _fullDate(date),
-                    style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            if (day.meals.isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: AppColors.brand.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(30),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.task_alt_rounded,
-                        color: AppColors.brand, size: 16),
-                    const SizedBox(width: 4),
-                    Text(
-                      '$doneCount/${day.meals.length}',
-                      style: text.labelLarge?.copyWith(
-                        color: AppColors.brand,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: AppColors.accent.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.local_fire_department_rounded,
-                      color: AppColors.accent, size: 16),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${day.totalCalories} kcal',
-                    style: text.labelLarge?.copyWith(
-                      color: AppColors.accent,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        _DayGroceryLink(onTap: onGrocery),
-        if (plan.hasMacros) ...[
-          const SizedBox(height: 14),
-          _MacroBars(day: day, plan: plan),
-        ],
-        const SizedBox(height: 14),
-        ...List.generate(day.meals.length, (m) {
-          final hi = m == highlightIndex;
-          return Padding(
-            key: hi ? mealKey : null,
-            padding: const EdgeInsets.only(bottom: 14),
-            child: _MealCard(
-              meal: day.meals[m],
-              highlight: hi,
-              done: isDone(m),
-              swapping: swappingIndex == m,
-              swapDisabled: swappingIndex != null,
-              onToggle: () => onToggle(m),
-              onSwap: () => onSwap(m),
-            ),
-          );
-        }),
-      ],
-    );
-  }
-}
-
-/// Three slim bars showing the day's protein / carbs / fat against the plan's
-/// daily targets.
-class _MacroBars extends StatelessWidget {
-  final DayPlan day;
-  final DietPlan plan;
-  const _MacroBars({required this.day, required this.plan});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _MacroBar(
-            label: 'Protein',
-            grams: day.totalProtein,
-            target: plan.dailyProteinTarget,
-            color: AppColors.brand,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _MacroBar(
-            label: 'Carbs',
-            grams: day.totalCarbs,
-            target: plan.dailyCarbsTarget,
-            color: AppColors.accent,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _MacroBar(
-            label: 'Fat',
-            grams: day.totalFat,
-            target: plan.dailyFatTarget,
-            color: AppColors.dinner,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MacroBar extends StatelessWidget {
-  final String label;
-  final int grams;
-  final int target;
-  final Color color;
-  const _MacroBar({
-    required this.label,
-    required this.grams,
-    required this.target,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final pct = target <= 0 ? 0.0 : (grams / target).clamp(0.0, 1.0);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label,
-                style: text.labelSmall?.copyWith(
-                    color: AppColors.inkMuted, fontWeight: FontWeight.w700)),
-            Text(target > 0 ? '$grams/${target}g' : '${grams}g',
-                style: text.labelSmall?.copyWith(
-                    color: AppColors.ink, fontWeight: FontWeight.w800)),
-          ],
-        ),
-        const SizedBox(height: 5),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: LinearProgressIndicator(
-            value: pct,
-            minHeight: 6,
-            backgroundColor: AppColors.line,
-            valueColor: AlwaysStoppedAnimation(color),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MealCard extends StatelessWidget {
-  final Meal meal;
-  final bool highlight;
-  final bool done;
-  final bool swapping; // this meal is being regenerated
-  final bool swapDisabled; // another meal on the day is being swapped
-  final VoidCallback? onToggle;
-  final VoidCallback? onSwap;
-  const _MealCard({
-    required this.meal,
-    this.highlight = false,
-    this.done = false,
-    this.swapping = false,
-    this.swapDisabled = false,
-    this.onToggle,
-    this.onSwap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final color = AppColors.forMeal(meal.name);
-    final mint = MacroColors.protein;
-    final bg = highlight
-        ? color.withValues(alpha: 0.06)
-        : (done ? mint.withValues(alpha: 0.05) : AppColors.surface);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOut,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        // Nocturne glass: a hairline defines every card; mint marks eaten,
-        // the meal colour marks a deep-link highlight.
-        border: Border.all(
-          color: highlight
-              ? color
-              : (done ? mint.withValues(alpha: 0.45) : AppColors.line),
-          width: highlight ? 2 : 1,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(AppColors.iconForMeal(meal.name), color: color, size: 19),
-                ),
-                const SizedBox(width: 13),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        meal.name.isEmpty ? 'Meal' : meal.name,
-                        style: text.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: color,
-                        ),
-                      ),
-                      if (meal.time.isNotEmpty)
-                        Text(meal.time,
-                            style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
-                    ],
-                  ),
-                ),
-                if (meal.calories > 0)
-                  Text(
-                    '${meal.calories} kcal',
-                    style: text.labelLarge?.copyWith(
-                      color: AppColors.inkMuted,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                if (onSwap != null) ...[
-                  const SizedBox(width: 6),
-                  _swapButton(context, color),
-                ],
-                if (onToggle != null) ...[
-                  const SizedBox(width: 6),
-                  _MealCheck(done: done, onTap: onToggle!),
-                ],
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              meal.dish,
-              style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            if (meal.description.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                meal.description,
-                style: text.bodySmall?.copyWith(color: AppColors.inkMuted, height: 1.4),
-              ),
-            ],
-            if (meal.protein > 0 || meal.carbs > 0 || meal.fat > 0) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  _macroChip(context, 'P', meal.protein, AppColors.brand),
-                  const SizedBox(width: 8),
-                  _macroChip(context, 'C', meal.carbs, AppColors.accent),
-                  const SizedBox(width: 8),
-                  _macroChip(context, 'F', meal.fat, AppColors.dinner),
-                ],
-              ),
-            ],
-            if (meal.ingredients.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              _Collapsible(
-                initiallyExpanded: false,
-                title: Text(
-                  'INGREDIENTS (${meal.ingredients.length})',
-                  style: text.labelSmall?.copyWith(
-                    color: AppColors.inkFaint,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.6,
-                  ),
-                ),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: meal.ingredients.map((ing) {
-                    final label = ing.quantity.isEmpty
-                        ? ing.name
-                        : '${ing.name} · ${ing.quantity}';
-                    return Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: AppColors.fieldFill,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.line),
-                      ),
-                      child: Text(
-                        label,
-                        style: text.bodySmall?.copyWith(
-                          color: AppColors.ink,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _macroChip(BuildContext context, String letter, int grams, Color color) {
-    final text = Theme.of(context).textTheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        '$letter ${grams}g',
-        style: text.labelSmall?.copyWith(color: color, fontWeight: FontWeight.w800),
-      ),
-    );
-  }
-
-  Widget _swapButton(BuildContext context, Color color) {
-    final enabled = !swapping && !swapDisabled;
-    return Semantics(
-      button: true,
-      label: 'Swap this meal for a different dish',
-      child: Material(
-        color: AppColors.fieldFill,
-        shape: CircleBorder(side: BorderSide(color: AppColors.line, width: 1.5)),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: enabled ? onSwap : null,
-          child: SizedBox(
-            width: 36,
-            height: 36,
-            child: swapping
-                ? const Padding(
-                    padding: EdgeInsets.all(9),
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(Icons.autorenew_rounded,
-                    size: 20, color: enabled ? color : AppColors.inkFaint),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A round check toggle shown on each meal card to mark it eaten.
-class _MealCheck extends StatelessWidget {
-  final bool done;
-  final VoidCallback onTap;
-  const _MealCheck({required this.done, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      checked: done,
-      label: done ? 'Meal eaten' : 'Mark meal eaten',
-      child: Material(
-        color: done ? AppColors.brand : AppColors.fieldFill,
-        shape: CircleBorder(
-          side: BorderSide(color: done ? AppColors.brand : AppColors.line, width: 1.5),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: SizedBox(
-            width: 36,
-            height: 36,
-            child: Icon(
-              Icons.check_rounded,
-              size: 20,
-              color: done ? Colors.white : AppColors.inkFaint,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A pill button in the gradient header (e.g. "Progress").
-/// A compact icon-only pill in the gradient header (e.g. the settings gear).

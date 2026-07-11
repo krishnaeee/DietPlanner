@@ -337,20 +337,20 @@ class _CheckBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mint = MacroColors.protein;
+    final dark = AppColors.brightness == Brightness.dark;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
       width: 26,
       height: 26,
       decoration: BoxDecoration(
-        color: checked ? AppColors.brand : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: checked ? AppColors.brand : AppColors.line,
-          width: 2,
-        ),
+        color: checked ? mint : Colors.transparent,
+        shape: BoxShape.circle,
+        border: Border.all(color: checked ? mint : AppColors.line, width: 2),
       ),
       child: checked
-          ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
+          ? Icon(Icons.check_rounded,
+              size: 16, color: dark ? const Color(0xFF062B1A) : Colors.white)
           : null,
     );
   }
@@ -366,36 +366,34 @@ class _ProgressCard extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final pct = total == 0 ? 0.0 : done / total;
     return SectionCard(
-      child: Row(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: AppColors.brand.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(Icons.shopping_basket_rounded,
-                color: AppColors.brand, size: 28),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('$done of $total in the basket',
-                    style: text.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: pct,
-                    minHeight: 8,
-                    backgroundColor: AppColors.line,
-                    valueColor: const AlwaysStoppedAnimation(AppColors.brand),
+          Text('$done OF $total IN THE BASKET',
+              style: text.labelSmall?.copyWith(
+                  color: AppColors.inkFaint,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                  fontSize: 8.5)),
+          const SizedBox(height: 9),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              height: 5,
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: AppColors.surfaceHigh),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: pct == 0 ? 0.001 : pct,
+                    child: const DecoratedBox(
+                      decoration:
+                          BoxDecoration(gradient: AppColors.ctaGradient),
+                    ),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ],

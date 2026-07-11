@@ -270,96 +270,114 @@ class _WeightCard extends StatelessWidget {
     }
     points.sort((a, b) => a.date.compareTo(b.date));
 
-    String goalLine;
-    Color goalColor = AppColors.brand;
-    if (current == null || target == null) {
-      goalLine = 'Log your weight to track progress.';
-    } else {
-      final toGo = (current - target).abs();
-      if (toGo < 0.3) {
-        goalLine = '🎉 You reached your target!';
-      } else {
-        final moved = start == null ? 0.0 : (start - current).abs();
-        goalColor = AppColors.brand;
-        goalLine = '${_fmtKg(toGo)} to target'
-            '${moved >= 0.1 ? ' · ${_fmtKg(moved)} so far' : ''}';
+    // Delta since the start; a mint chip when moving toward the target.
+    final delta = (start != null && current != null) ? current - start : null;
+    Color deltaColor = AppColors.brand;
+    if (delta != null && target != null && start != null) {
+      final towards = (target - start).sign;
+      if (delta.sign == towards && delta.abs() >= 0.1) {
+        deltaColor = MacroColors.protein; // moving the right way
       }
     }
+    final reached =
+        current != null && target != null && (current - target).abs() < 0.3;
+
+    Widget micro(String s) => Text(s,
+        style: text.labelSmall?.copyWith(
+            color: AppColors.inkFaint,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.2,
+            fontSize: 8.5));
 
     return SectionCard(
-      title: 'Weight progress',
-      icon: Icons.monitor_weight_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          micro('CURRENT WEIGHT'),
+          const SizedBox(height: 6),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              _stat(context, 'Start', start),
-              _divider(),
-              _stat(context, 'Current', current, emphasize: true),
-              _divider(),
-              _stat(context, 'Target', target),
+              RichText(
+                text: TextSpan(
+                  style: text.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -2,
+                      height: 1,
+                      color: AppColors.ink),
+                  children: [
+                    TextSpan(
+                        text: current == null
+                            ? '—'
+                            : _fmtKg(current).replaceAll(' kg', '')),
+                    TextSpan(
+                      text: ' kg',
+                      style: text.titleSmall?.copyWith(
+                          color: AppColors.inkMuted, fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (reached)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: MacroColors.protein.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  child: Text('🎉 target reached',
+                      style: text.labelSmall?.copyWith(
+                          color: MacroColors.protein,
+                          fontWeight: FontWeight.w800)),
+                )
+              else if (delta != null && delta.abs() >= 0.1)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: deltaColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  child: Text(
+                    '${delta < 0 ? '▾' : '▴'} ${_fmtKg(delta.abs())}',
+                    style: text.labelSmall?.copyWith(
+                        color: deltaColor, fontWeight: FontWeight.w800),
+                  ),
+                ),
             ],
           ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              color: goalColor.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              goalLine,
-              style: text.bodySmall
-                  ?.copyWith(color: goalColor, fontWeight: FontWeight.w700),
-            ),
-          ),
           if (points.length >= 2) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
             SizedBox(
-              height: 140,
+              height: 120,
               width: double.infinity,
               child: CustomPaint(
                 painter: _WeightChartPainter(points: points, target: target),
               ),
             ),
           ],
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: onLog,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text("Log today's weight"),
-            ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              micro(start == null ? '' : '${_fmtKg(start).toUpperCase()} · START'),
+              micro(target == null
+                  ? ''
+                  : 'TARGET ${_fmtKg(target).toUpperCase()} ---'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          GradientButton(
+            label: "Log today's weight",
+            icon: Icons.add_rounded,
+            onPressed: onLog,
           ),
         ],
       ),
     );
   }
-
-  Widget _stat(BuildContext context, String label, double? kg,
-      {bool emphasize = false}) {
-    final text = Theme.of(context).textTheme;
-    return Expanded(
-      child: Column(
-        children: [
-          Text(label, style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
-          const SizedBox(height: 4),
-          Text(
-            kg == null ? '—' : _fmtKg(kg),
-            style: (emphasize ? text.titleLarge : text.titleMedium)?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: emphasize ? AppColors.brand : AppColors.ink,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _divider() =>
-      Container(width: 1, height: 34, color: AppColors.line);
 }
 
 class _WeightChartPainter extends CustomPainter {
@@ -450,6 +468,36 @@ class _WeightChartPainter extends CustomPainter {
 
 // ──────────────────────────────────────────────────────────── streak card ──
 
+/// Seven dots for the last seven calendar days; mint = an active day.
+class _WeekDots extends StatelessWidget {
+  final Set<String> active;
+  const _WeekDots({required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final mint = MacroColors.protein;
+    return Row(
+      children: [
+        for (var i = 6; i >= 0; i--) ...[
+          Container(
+            width: 9,
+            height: 9,
+            margin: const EdgeInsets.only(right: 4),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: active.contains(
+                      dateKey(now.subtract(Duration(days: i))))
+                  ? mint
+                  : AppColors.surfaceHigh,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _StreakCard extends StatelessWidget {
   final StoredPlan stored;
   final PlanTracking tracking;
@@ -463,24 +511,24 @@ class _StreakCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.local_fire_department_rounded,
-                  color: AppColors.accent, size: 20),
-              const SizedBox(width: 6),
-              Text('Streak',
-                  style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
-            ],
-          ),
-          const SizedBox(height: 10),
+          Text('STREAK',
+              style: text.labelSmall?.copyWith(
+                  color: AppColors.inkFaint,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                  fontSize: 8.5)),
+          const SizedBox(height: 6),
           RichText(
             text: TextSpan(
-              style: text.headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w800, color: AppColors.ink),
+              style: text.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.8,
+                  color: AppColors.ink),
               children: [
+                const TextSpan(text: '🔥 '),
                 TextSpan(text: '$streak'),
                 TextSpan(
-                  text: streak == 1 ? '  day' : '  days',
+                  text: streak == 1 ? ' day' : ' days',
                   style: text.bodySmall?.copyWith(
                     color: AppColors.inkMuted,
                     fontWeight: FontWeight.w700,
@@ -489,11 +537,8 @@ class _StreakCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            streak == 0 ? 'Log today to start' : 'Keep it going!',
-            style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
-          ),
+          const SizedBox(height: 9),
+          _WeekDots(active: tracking.activeDays(stored.startDate)),
         ],
       ),
     );
@@ -516,34 +561,44 @@ class _AdherenceCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.task_alt_rounded, color: AppColors.brand, size: 20),
-              const SizedBox(width: 6),
-              Text('Adherence',
-                  style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
-            ],
+          Text('MEALS EATEN',
+              style: text.labelSmall?.copyWith(
+                  color: AppColors.inkFaint,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                  fontSize: 8.5)),
+          const SizedBox(height: 6),
+          RichText(
+            text: TextSpan(
+              style: text.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.8,
+                  color: AppColors.ink),
+              children: [
+                TextSpan(text: '${(pct * 100).round()}'),
+                TextSpan(
+                  text: '%',
+                  style: text.bodySmall?.copyWith(
+                      color: AppColors.inkMuted, fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 10),
-          Text('${(pct * 100).round()}%',
-              style: text.headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w800, color: AppColors.ink)),
-          const SizedBox(height: 8),
+          const SizedBox(height: 9),
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
               value: pct,
-              minHeight: 8,
-              backgroundColor: AppColors.line,
+              minHeight: 5,
+              backgroundColor: AppColors.surfaceHigh,
               valueColor: const AlwaysStoppedAnimation(AppColors.brand),
             ),
           ),
           const SizedBox(height: 6),
           Text(
-            a.total == 0
-                ? 'Starts on Day 1'
-                : '${a.done} of ${a.total} meals',
-            style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
+            a.total == 0 ? 'Starts on Day 1' : '${a.done} of ${a.total} meals',
+            style: text.bodySmall
+                ?.copyWith(color: AppColors.inkMuted, fontSize: 10.5),
           ),
         ],
       ),
@@ -573,49 +628,39 @@ class _WaterCard extends StatelessWidget {
     const blue = Color(0xFF3AA0E3);
 
     return SectionCard(
-      title: 'Water intake',
-      icon: Icons.water_drop_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text('WATER TODAY · $glasses OF $goal',
+              style: text.labelSmall?.copyWith(
+                  color: AppColors.inkFaint,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                  fontSize: 8.5)),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
-                child: RichText(
-                  text: TextSpan(
-                    style: text.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w800, color: AppColors.ink),
-                    children: [
-                      TextSpan(text: '$glasses'),
-                      TextSpan(
-                        text: ' / $goal glasses',
-                        style: text.bodyMedium?.copyWith(
-                          color: AppColors.inkMuted,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+                child: Wrap(
+                  spacing: 5,
+                  runSpacing: 6,
+                  children: List.generate(math.max(goal, glasses), (i) {
+                    final filled = i < glasses;
+                    return Icon(
+                      Icons.water_drop_rounded,
+                      color: filled
+                          ? blue
+                          : blue.withValues(alpha: 0.18),
+                      size: 22,
+                    );
+                  }),
                 ),
               ),
               _roundBtn(Icons.remove_rounded,
                   glasses > 0 ? () => onSet(glasses - 1) : null),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               _roundBtn(Icons.add_rounded, () => onSet(glasses + 1), filled: true),
             ],
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: List.generate(math.max(goal, glasses), (i) {
-              final filled = i < glasses;
-              return Icon(
-                filled ? Icons.local_drink_rounded : Icons.local_drink_outlined,
-                color: filled ? blue : AppColors.line,
-                size: 26,
-              );
-            }),
           ),
           const SizedBox(height: 6),
           const Divider(),

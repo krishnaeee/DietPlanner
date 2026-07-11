@@ -62,7 +62,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Weight progress'), findsOneWidget);
+    expect(find.text('CURRENT WEIGHT'), findsOneWidget);
+    expect(find.text("Log today's weight"), findsOneWidget);
   });
 
   testWidgets('Logging a weight rebuilds without error', (tester) async {

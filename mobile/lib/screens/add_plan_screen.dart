@@ -264,30 +264,34 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
   }
 
   Widget _goalStep() {
-    final text = Theme.of(context).textTheme;
     return _stepScaffold(
-      title: "What's your goal?",
-      subtitle: "We'll shape the whole plan — calories, macros and meals — around this.",
+      title: "What's\nthe goal?",
+      subtitle: "We'll shape the calories, macros and meals around this.",
       children: [
-        _PillToggle<String>(
-          selected: _goal,
-          onChanged: (v) => setState(() => _goal = v),
-          options: const [
-            (value: 'lose', label: 'Lose', icon: Icons.trending_down_rounded),
-            (value: 'gain', label: 'Gain', icon: Icons.trending_up_rounded),
-            (value: 'maintain', label: 'Healthy', icon: Icons.favorite_rounded),
-          ],
+        _GoalOption(
+          icon: Icons.trending_down_rounded,
+          title: 'Lose weight',
+          sub: 'A safe deficit, built from local food',
+          selected: _goal == 'lose',
+          onTap: () => setState(() => _goal = 'lose'),
         ),
-        const SizedBox(height: 12),
-        Text(
-          _maintain
-              ? 'A balanced plan to maintain your weight and eat well — no target needed.'
-              : _goal == 'gain'
-                  ? 'A higher-calorie, protein-rich plan to reach your target weight.'
-                  : 'A safe-deficit plan to reach your target weight.',
-          style: text.bodySmall?.copyWith(color: AppColors.inkMuted),
+        const SizedBox(height: 11),
+        _GoalOption(
+          icon: Icons.trending_up_rounded,
+          title: 'Gain weight',
+          sub: 'Higher calories, protein-forward',
+          selected: _goal == 'gain',
+          onTap: () => setState(() => _goal = 'gain'),
         ),
-        const SizedBox(height: 26),
+        const SizedBox(height: 11),
+        _GoalOption(
+          icon: Icons.favorite_rounded,
+          title: 'Just eat healthier',
+          sub: 'Balanced maintenance, no target',
+          selected: _goal == 'maintain',
+          onTap: () => setState(() => _goal = 'maintain'),
+        ),
+        const SizedBox(height: 24),
         const FieldLabel('Plan name (optional)'),
         _LabeledField(
           controller: _planName,
@@ -540,6 +544,95 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// A goal option card: glass, wrapped in the aurora gradient when selected.
+class _GoalOption extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String sub;
+  final bool selected;
+  final VoidCallback onTap;
+  const _GoalOption({
+    required this.icon,
+    required this.title,
+    required this.sub,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final card = Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(selected ? 16.5 : 18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(selected ? 16.5 : 18),
+            border: selected ? null : Border.all(color: AppColors.line),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(13),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceHigh,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Icon(icon,
+                      color: selected ? AppColors.brand : AppColors.inkMuted,
+                      size: 21),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: text.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 1),
+                      Text(sub,
+                          style: text.bodySmall?.copyWith(
+                              color: AppColors.inkMuted, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                if (selected)
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: const BoxDecoration(
+                      gradient: AppColors.ctaGradient,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.check_rounded,
+                        size: 14, color: Colors.white),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (!selected) return card;
+    // Selection = the aurora gradient ring.
+    return Container(
+      decoration: BoxDecoration(
+        gradient: AppColors.auroraGradient,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      padding: const EdgeInsets.all(1.5),
+      child: card,
     );
   }
 }
