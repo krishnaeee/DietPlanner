@@ -195,7 +195,7 @@ class _BalanceCard extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: AppColors.brandGradient,
         borderRadius: BorderRadius.circular(AppRadius.card),
-        boxShadow: softShadow(opacity: 0.18, blur: 24, y: 10),
+        boxShadow: coralGlow(),
       ),
       child: Row(
         children: [
@@ -371,7 +371,7 @@ class _ProductCard extends StatelessWidget {
             color: product.bestValue ? AppColors.accent : AppColors.line,
             width: product.bestValue ? 2 : 1,
           ),
-          boxShadow: softShadow(opacity: 0.05, blur: 16, y: 6),
+          boxShadow: softShadow(),
         ),
         padding: const EdgeInsets.all(16),
         child: Row(

@@ -781,9 +781,9 @@ class _PillToggle<T> extends StatelessWidget {
                   boxShadow: sel
                       ? [
                           BoxShadow(
-                            color: AppColors.brand.withValues(alpha: 0.30),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
+                            color: AppColors.brand.withValues(alpha: 0.15),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
                           ),
                         ]
                       : null,
@@ -939,13 +939,7 @@ class PrimaryButton extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: AppColors.brandGradient,
         borderRadius: BorderRadius.circular(AppRadius.field),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.brand.withValues(alpha: 0.35),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        boxShadow: coralGlow(),
       ),
       child: Material(
         color: Colors.transparent,

@@ -242,7 +242,7 @@ class _RingPainter extends CustomPainter {
         ..strokeWidth = 11
         ..strokeCap = StrokeCap.round
         ..shader = shader
-        ..maskFilter = const ui.MaskFilter.blur(ui.BlurStyle.normal, 7),
+        ..maskFilter = const ui.MaskFilter.blur(ui.BlurStyle.normal, 4),
     );
     canvas.drawArc(
       rect,

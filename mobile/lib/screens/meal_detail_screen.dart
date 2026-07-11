@@ -153,7 +153,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                             center: Alignment(-0.35, -0.4),
                             colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
                           ),
-                          boxShadow: coralGlow(opacity: 0.45, blur: 44, y: 16),
+                          boxShadow: coralGlow(opacity: 0.20, blur: 16, y: 5),
                         ),
                         child: Icon(AppColors.iconForMeal(meal.name),
                             color: Colors.white, size: 48),

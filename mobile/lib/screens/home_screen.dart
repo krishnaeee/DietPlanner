@@ -406,15 +406,14 @@ class _PlanCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: goal.color.withValues(
-                        alpha: AppColors.brightness == Brightness.dark ? 0.16 : 0.10),
+                        alpha: AppColors.brightness == Brightness.dark ? 0.14 : 0.09),
                     boxShadow: [
                       BoxShadow(
                         color: goal.color.withValues(
                             alpha: AppColors.brightness == Brightness.dark
-                                ? 0.45
-                                : 0.30),
-                        blurRadius: 70,
-                        spreadRadius: 12,
+                                ? 0.22
+                                : 0.14),
+                        blurRadius: 36,
                       ),
                     ],
                   ),

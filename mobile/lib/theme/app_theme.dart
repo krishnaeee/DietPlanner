@@ -102,7 +102,7 @@ class AppRadius {
 
 /// A soft, low-contrast elevation. On dark it barely registers (glass cards
 /// lean on hairline borders); on light it's a cool, faint drop.
-List<BoxShadow> softShadow({double opacity = 0.06, double blur = 24, double y = 12}) {
+List<BoxShadow> softShadow({double opacity = 0.04, double blur = 10, double y = 3}) {
   final dark = AppColors.brightness == Brightness.dark;
   final color = dark ? Colors.black : const Color(0xFF171A26);
   final a = dark ? (opacity * 0.5).clamp(0.0, 0.25) : opacity;
@@ -112,7 +112,7 @@ List<BoxShadow> softShadow({double opacity = 0.06, double blur = 24, double y = 
 }
 
 /// The coral glow used under gradient CTAs and the ring.
-List<BoxShadow> coralGlow({double opacity = 0.35, double blur = 24, double y = 8}) {
+List<BoxShadow> coralGlow({double opacity = 0.16, double blur = 10, double y = 3}) {
   return [
     BoxShadow(
       color: const Color(0xFFFF4D6D).withValues(alpha: opacity),

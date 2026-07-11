@@ -129,7 +129,7 @@ class AuthHero extends StatelessWidget {
                     center: Alignment(-0.35, -0.4),
                     colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
                   ),
-                  boxShadow: coralGlow(opacity: 0.45, blur: 40, y: 14),
+                  boxShadow: coralGlow(opacity: 0.20, blur: 16, y: 5),
                 ),
                 child: const Icon(Icons.eco_rounded, color: Colors.white, size: 40),
               ),

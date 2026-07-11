@@ -73,9 +73,9 @@ class _Dock extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color: (dark ? Colors.black : const Color(0xFF171A26))
-                    .withValues(alpha: dark ? 0.45 : 0.14),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+                    .withValues(alpha: dark ? 0.28 : 0.09),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
           ),

@@ -253,7 +253,7 @@ class _CookingLoaderState extends State<_CookingLoader>
                         center: Alignment(-0.35, -0.4),
                         colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
                       ),
-                      boxShadow: coralGlow(opacity: 0.4, blur: 34, y: 12),
+                      boxShadow: coralGlow(opacity: 0.20, blur: 14, y: 5),
                     ),
                     child: const Icon(Icons.local_dining_rounded,
                         color: Colors.white, size: 34),
