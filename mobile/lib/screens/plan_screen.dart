@@ -248,11 +248,15 @@ class _CookingLoaderState extends State<_CookingLoader>
                     width: 78,
                     height: 78,
                     decoration: BoxDecoration(
-                      color: AppColors.brand.withValues(alpha: 0.10),
                       shape: BoxShape.circle,
+                      gradient: const RadialGradient(
+                        center: Alignment(-0.35, -0.4),
+                        colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
+                      ),
+                      boxShadow: coralGlow(opacity: 0.4, blur: 34, y: 12),
                     ),
                     child: const Icon(Icons.local_dining_rounded,
-                        color: AppColors.brand, size: 36),
+                        color: Colors.white, size: 34),
                   ),
                 ],
               ),

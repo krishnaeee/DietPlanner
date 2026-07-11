@@ -264,45 +264,81 @@ class _SubscriptionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    // The flagship card wears the aurora gradient ring.
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: AppColors.brand, width: 2),
-        boxShadow: softShadow(),
+        gradient: AppColors.auroraGradient,
+        borderRadius: BorderRadius.circular(AppRadius.card + 1.5),
       ),
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.all_inclusive_rounded, color: AppColors.brand),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(product.title,
-                    style: text.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-              ),
-              Text(product.priceLabel,
-                  style: text.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800, color: AppColors.brandDark)),
-              Text('/mo', style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(product.description,
-              style: text.bodyMedium?.copyWith(color: AppColors.inkMuted)),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: (active || disabled) ? null : onBuy,
-              child: busy
-                  ? const _BtnSpinner()
-                  : Text(active ? 'Active' : 'Go unlimited'),
+      padding: const EdgeInsets.all(1.5),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+        ),
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.all_inclusive_rounded, color: AppColors.brand),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(product.title,
+                      style:
+                          text.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                ),
+                Text(product.priceLabel,
+                    style: text.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900, color: AppColors.brand)),
+                Text('/mo',
+                    style: text.bodySmall?.copyWith(color: AppColors.inkMuted)),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 6),
+            Text(product.description,
+                style: text.bodyMedium?.copyWith(color: AppColors.inkMuted)),
+            const SizedBox(height: 14),
+            if (busy)
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh,
+                  borderRadius: BorderRadius.circular(AppRadius.field),
+                ),
+                child: const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+              )
+            else if (active)
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: MacroColors.protein.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppRadius.field),
+                ),
+                child: Text('Active ✓',
+                    style: text.titleSmall?.copyWith(
+                        color: MacroColors.protein, fontWeight: FontWeight.w800)),
+              )
+            else
+              IgnorePointer(
+                ignoring: disabled,
+                child: Opacity(
+                  opacity: disabled ? 0.5 : 1,
+                  child: GradientButton(
+                    label: 'Go unlimited',
+                    icon: Icons.all_inclusive_rounded,
+                    onPressed: onBuy,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -341,13 +377,13 @@ class _ProductCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                color: AppColors.brand.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(14),
+                color: AppColors.surfaceHigh,
+                borderRadius: BorderRadius.circular(13),
               ),
-              child: Icon(icon, color: AppColors.brand),
+              child: Icon(icon, color: AppColors.brand, size: 21),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -428,11 +464,13 @@ class _SectionLabel extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(left: 4),
       child: Text(
-        text,
-        style: Theme.of(context)
-            .textTheme
-            .titleMedium
-            ?.copyWith(fontWeight: FontWeight.w800),
+        text.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: AppColors.inkFaint,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+              fontSize: 9,
+            ),
       ),
     );
   }
@@ -448,6 +486,7 @@ class _ReasonBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.accent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.35)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

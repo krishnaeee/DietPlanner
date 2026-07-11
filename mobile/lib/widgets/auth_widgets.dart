@@ -84,20 +84,96 @@ class AuthField extends StatelessWidget {
   }
 }
 
-/// The leaf badge shown in the auth header.
-class AuthBadge extends StatelessWidget {
-  const AuthBadge({super.key});
+/// Nocturne auth hero: the app-mark as a lit coral orb over a violet haze,
+/// followed by a heavy title and a muted subtitle.
+class AuthHero extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  const AuthHero({super.key, required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 140,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    gradient: RadialGradient(
+                      center: const Alignment(0, -0.2),
+                      radius: 1.0,
+                      colors: [
+                        AppColors.violet.withValues(
+                            alpha: AppColors.brightness == Brightness.dark
+                                ? 0.20
+                                : 0.12),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const RadialGradient(
+                    center: Alignment(-0.35, -0.4),
+                    colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
+                  ),
+                  boxShadow: coralGlow(opacity: 0.45, blur: 40, y: 14),
+                ),
+                child: const Icon(Icons.eco_rounded, color: Colors.white, size: 40),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        Text(title,
+            style: text.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w900, letterSpacing: -0.8, height: 1.05)),
+        const SizedBox(height: 6),
+        Text(subtitle,
+            style: text.bodyMedium
+                ?.copyWith(color: AppColors.inkMuted, height: 1.4)),
+      ],
+    );
+  }
+}
+
+/// A glass "working…" box shown in place of the CTA while busy.
+class AuthBusyBox extends StatelessWidget {
+  final String label;
+  const AuthBusyBox({super.key, required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 44,
-      height: 44,
+      padding: const EdgeInsets.symmetric(vertical: 15),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(14),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.field),
+        border: Border.all(color: AppColors.line),
       ),
-      child: const Icon(Icons.eco_rounded, color: Colors.white, size: 24),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+              width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 10),
+          Text(label,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: AppColors.inkMuted, fontWeight: FontWeight.w800)),
+        ],
+      ),
     );
   }
 }

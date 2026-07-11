@@ -18,8 +18,8 @@ void main() {
     await tester.pumpWidget(const DietPlannerApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome back'), findsOneWidget); // login header
+    expect(find.text('Welcome back.'), findsOneWidget); // login hero title
     expect(find.text('Email'), findsOneWidget); // email field label
-    expect(find.widgetWithText(FilledButton, 'Log in'), findsOneWidget);
+    expect(find.text('Log in'), findsOneWidget); // gradient CTA
   });
 }

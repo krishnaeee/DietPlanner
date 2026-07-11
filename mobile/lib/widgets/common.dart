@@ -2,102 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// The rounded gradient header used at the top of every screen.
-class GradientHeader extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  final bool showBack;
-  final Widget? trailing;
-  final Widget? badge;
-
-  const GradientHeader({
-    super.key,
-    required this.title,
-    this.subtitle,
-    this.showBack = false,
-    this.trailing,
-    this.badge,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Container(
-      decoration: BoxDecoration(
-        gradient: AppColors.brandGradient,
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  if (showBack)
-                    _CircleButton(
-                      icon: Icons.arrow_back_rounded,
-                      onTap: () => Navigator.of(context).maybePop(),
-                    ),
-                  if (showBack) const SizedBox(width: 12),
-                  if (badge != null) ...[badge!, const SizedBox(width: 12)],
-                  const Spacer(),
-                  ?trailing,
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                style: text.headlineSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              if (subtitle != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  subtitle!,
-                  style: text.bodyMedium?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.88),
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CircleButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _CircleButton({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.18),
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          width: 40,
-          height: 40,
-          child: Icon(icon, color: Colors.white, size: 22),
-        ),
-      ),
-    );
-  }
-}
-
-/// A white rounded card with a soft shadow and an optional titled header.
+/// A glass card with an optional Nocturne micro-label header.
 class SectionCard extends StatelessWidget {
   final String? title;
   final IconData? icon;
@@ -130,16 +35,21 @@ class SectionCard extends StatelessWidget {
               Row(
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, size: 18, color: AppColors.brand),
-                    const SizedBox(width: 8),
+                    Icon(icon, size: 14, color: AppColors.brand),
+                    const SizedBox(width: 7),
                   ],
                   Text(
-                    title!,
-                    style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    title!.toUpperCase(),
+                    style: text.labelSmall?.copyWith(
+                      color: AppColors.inkFaint,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                      fontSize: 8.5,
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 13),
             ],
             child,
           ],
