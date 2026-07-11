@@ -141,6 +141,12 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             child: _items.isEmpty
                 ? _EmptyState(text: text)
                 : ListView(
+                    // All rows sit in one tall SectionCard. With the default
+                    // per-child RepaintBoundary, that single child is raster-
+                    // cached as one texture taller than the GPU's max texture
+                    // size, so rows past the limit (bottom of the list) render
+                    // aliased. Painting directly (no boundary) keeps them crisp.
+                    addRepaintBoundaries: false,
                     padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
                     children: [
                       _ProgressCard(done: _doneCount, total: _items.length),
@@ -290,41 +296,56 @@ class _GroceryRow extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        child: Row(
-          children: [
-            _CheckBox(checked: checked),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                item.name,
-                style: text.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: checked ? AppColors.inkFaint : AppColors.ink,
-                  decoration: checked ? TextDecoration.lineThrough : null,
-                  decorationColor: AppColors.inkFaint,
-                ),
-              ),
-            ),
-            if (item.quantity.isNotEmpty) ...[
-              const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: checked
-                      ? AppColors.fieldFill
-                      : AppColors.brand.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  item.quantity,
-                  style: text.bodySmall?.copyWith(
-                    color: checked ? AppColors.inkFaint : AppColors.brandDark,
-                    fontWeight: FontWeight.w700,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Cap the quantity pill's width so a long combined amount (e.g.
+            // "2 pcs medium + 1 pcs large") wraps inside the pill instead of
+            // stealing the row and starving the ingredient name down to
+            // one-character-per-line.
+            final maxQtyWidth = constraints.maxWidth * 0.42;
+            return Row(
+              children: [
+                _CheckBox(checked: checked),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: checked ? AppColors.inkFaint : AppColors.ink,
+                      decoration: checked ? TextDecoration.lineThrough : null,
+                      decorationColor: AppColors.inkFaint,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ],
+                if (item.quantity.isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: maxQtyWidth),
+                    child: Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: checked
+                            ? AppColors.fieldFill
+                            : AppColors.brand.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        item.quantity,
+                        style: text.bodySmall?.copyWith(
+                          color: checked ? AppColors.inkFaint : AppColors.brandDark,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
         ),
       ),
     );

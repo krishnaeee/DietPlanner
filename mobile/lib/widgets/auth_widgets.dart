@@ -133,7 +133,6 @@ class AuthHero extends StatelessWidget {
                     radius: 1.35,
                     colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
                   ),
-                  boxShadow: coralGlow(opacity: 0.20, blur: 16, y: 5),
                 ),
                 child: Stack(
                   children: [
