@@ -84,8 +84,9 @@ class AuthField extends StatelessWidget {
   }
 }
 
-/// Nocturne auth hero: the app-mark as a lit coral orb over a violet haze,
-/// followed by a heavy title and a muted subtitle.
+/// Nocturne auth hero: the app-mark (identical to the launcher icon — a coral
+/// gradient tile with the white leaf + three-star sparkle) over a heavy title
+/// and muted subtitle. No backdrop glow: the tile sits cleanly on the page.
 class AuthHero extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -98,58 +99,37 @@ class AuthHero extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          height: 140,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    gradient: RadialGradient(
-                      center: const Alignment(0, -0.2),
-                      radius: 1.0,
-                      colors: [
-                        AppColors.violet.withValues(
-                            alpha: AppColors.brightness == Brightness.dark
-                                ? 0.20
-                                : 0.12),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
+          height: 130,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            // The app mark — identical to the launcher icon: full coral
+            // gradient tile, white leaf, white three-star sparkle.
+            child: Container(
+              width: 92,
+              height: 92,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(26),
+                gradient: const RadialGradient(
+                  center: Alignment(-0.45, -0.55),
+                  radius: 1.35,
+                  colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
                 ),
               ),
-              // The app mark — identical to the launcher icon: full coral
-              // gradient tile, white leaf, white three-star sparkle.
-              Container(
-                width: 92,
-                height: 92,
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(26),
-                  gradient: const RadialGradient(
-                    center: Alignment(-0.45, -0.55),
-                    radius: 1.35,
-                    colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
+              child: Stack(
+                children: [
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 4, right: 4),
+                      child:
+                          Icon(Icons.eco_rounded, color: Colors.white, size: 42),
+                    ),
                   ),
-                ),
-                child: Stack(
-                  children: [
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.only(top: 4, right: 4),
-                        child:
-                            Icon(Icons.eco_rounded, color: Colors.white, size: 42),
-                      ),
-                    ),
-                    const Positioned.fill(
-                      child: CustomPaint(painter: _SparkClusterPainter()),
-                    ),
-                  ],
-                ),
+                  const Positioned.fill(
+                    child: CustomPaint(painter: _SparkClusterPainter()),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
         const SizedBox(height: 18),

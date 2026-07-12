@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../screens/grocery_list_screen.dart';
 import '../screens/plan_screen.dart';
 import '../screens/progress_screen.dart';
 import 'plan_storage.dart';
@@ -40,9 +42,23 @@ Future<void> routeFromNotification(String payload) async {
 
   final nav = appNavigatorKey.currentState;
   if (nav == null) return;
-  // Hydration nudges open the progress dashboard; meal/grocery open the plan.
+  // Hydration nudges open the progress dashboard; grocery reminders open the
+  // grocery list for that day; meal reminders open the plan at that meal.
   if (type == 'water') {
     nav.push(MaterialPageRoute(builder: (_) => ProgressScreen(stored: sp)));
+    return;
+  }
+  if (type == 'grocery') {
+    final days = sp.plan.days;
+    final start = days.isEmpty ? 0 : day.clamp(0, days.length - 1);
+    nav.push(MaterialPageRoute(
+      builder: (_) => GroceryListScreen(
+        plan: sp.plan,
+        startIndex: start,
+        windowDays: days.isEmpty ? 7 : math.min(7, days.length - start),
+        startInDayMode: true,
+      ),
+    ));
     return;
   }
   nav.push(MaterialPageRoute(
