@@ -20,6 +20,16 @@ app.use(express.json({ limit: '1mb' }));
 
 const PORT = Number(process.env.PORT || 3000);
 
+// Deployed-version marker. Render injects RENDER_GIT_COMMIT/BRANCH at runtime,
+// so /health can report exactly what's live — turning the keep-warm cron into a
+// deploy monitor (the commit flips when a push to main auto-deploys). startedAt
+// shows when this instance booted (i.e. the deploy/restart time).
+const VERSION = {
+  commit: (process.env.RENDER_GIT_COMMIT || 'dev').slice(0, 7),
+  branch: process.env.RENDER_GIT_BRANCH || null,
+  startedAt: new Date().toISOString(),
+};
+
 // Auth: signup / login / me (token verification).
 app.use('/api/auth', authRouter);
 // Billing: balance/catalog, checkout, return page.
@@ -149,10 +159,10 @@ function validate(body) {
 app.get('/health', async (_req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ ok: true, db: 'up', maxPlanDays: MAX_PLAN_DAYS });
+    res.json({ ok: true, db: 'up', maxPlanDays: MAX_PLAN_DAYS, version: VERSION });
   } catch (err) {
     console.error('[health] DB check failed:', err.message);
-    res.status(503).json({ ok: false, db: 'down', maxPlanDays: MAX_PLAN_DAYS });
+    res.status(503).json({ ok: false, db: 'down', maxPlanDays: MAX_PLAN_DAYS, version: VERSION });
   }
 });
 
