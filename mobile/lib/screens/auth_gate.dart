@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
+import '../services/sync_service.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
@@ -32,6 +33,10 @@ class _AuthGateState extends State<AuthGate> {
     // windows forward and restores anything lost to a reboot. Fire-and-forget so
     // it never blocks the first screen.
     NotificationService.instance.refreshAll();
+    // Restore any plans/tracking that live on the server but not on this device
+    // (fresh install / new phone). Fire-and-forget — restored plans surface via
+    // PlanStorage.revision once they land; never blocks the first screen.
+    SyncService.instance.pullAll();
     if (mounted) setState(() => _checking = false);
   }
 

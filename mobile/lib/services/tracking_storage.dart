@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/tracking.dart';
 import 'auth_service.dart';
+import 'sync_service.dart';
 
 /// Persists per-plan [PlanTracking] in a single per-account blob, mirroring the
 /// key scheme of [PlanStorage]: each signed-in user gets their own key so
@@ -47,6 +48,7 @@ class TrackingStorage {
     map[planId] = t.toJson();
     await prefs.setString(_key, jsonEncode(map));
     revision.value++;
+    SyncService.instance.pushTracking(planId, t); // best-effort server sync
   }
 
   /// Drops a plan's tracking (call when the plan itself is deleted).

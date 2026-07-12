@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/diet_plan.dart';
 import 'auth_service.dart';
+import 'sync_service.dart';
 
 /// One saved, named plan plus its reminder state.
 ///
@@ -208,6 +209,7 @@ class PlanStorage {
       all.add(p);
     }
     await _saveList(all);
+    SyncService.instance.pushPlan(p); // best-effort server sync
   }
 
   static Future<void> rename(String id, String name) async {
@@ -216,6 +218,7 @@ class PlanStorage {
     if (i >= 0) {
       all[i] = all[i].copyWith(name: name);
       await _saveList(all);
+      SyncService.instance.pushPlan(all[i]);
     }
   }
 
@@ -223,6 +226,7 @@ class PlanStorage {
     final all = await loadAll();
     all.removeWhere((e) => e.id == id);
     await _saveList(all);
+    SyncService.instance.deletePlanRemote(id);
   }
 
   /// Smallest slot integer not used by [existing] — for notification namespacing.
