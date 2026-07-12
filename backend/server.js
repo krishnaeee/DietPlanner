@@ -5,7 +5,8 @@ import { generatePlan, generateMeal, MAX_PLAN_DAYS } from './planService.js';
 import { describeProvider } from './providers.js';
 import { authRouter, requireAuth } from './auth.js';
 import { billingRouter, stripeWebhookHandler } from './billingRoutes.js';
-import { getEntitlements, spendCredits, addCredits, pool } from './db.js';
+import { getEntitlements, spendCredits, addCredits, applyRetarget, pool } from './db.js';
+import { decideRetarget } from './retarget.js';
 import { BILLING_PROVIDER, CURRENCY } from './billing.js';
 
 const app = express();
@@ -121,6 +122,23 @@ function validate(body) {
       .slice(0, 40); // cap so the prompt stays bounded
   }
 
+  // Adaptive re-target inputs (only meaningful on a continuation week). The
+  // client sends its latest weigh-in + trend so the next week can be re-paced to
+  // real progress; planId lets the decision be persisted to the audit trail.
+  if (body.currentWeightKg != null && body.currentWeightKg !== '') {
+    const cw = num(body.currentWeightKg);
+    if (cw > 0 && cw < 500) value.currentWeightKg = cw;
+  }
+  if (typeof body.planId === 'string' && body.planId.trim()) {
+    value.planId = body.planId.trim();
+  }
+  if (Array.isArray(body.weighIns)) {
+    value.weighIns = body.weighIns
+      .filter((w) => w && w.date && isFinite(num(w.kg)))
+      .map((w) => ({ date: String(w.date), kg: num(w.kg) }))
+      .slice(0, 60);
+  }
+
   return errors.length ? { error: errors } : { value };
 }
 
@@ -168,8 +186,51 @@ app.post('/api/plan', requireAuth, async (req, res) => {
     creditSpent = true;
   }
 
+  // ── Adaptive re-target: on a continuation week, recompute the calorie target
+  // from the user's latest weigh-in and re-pace to the deadline, so the new week
+  // adapts to real progress (metabolic slowdown, plateau, or ahead of schedule).
+  // No re-target inputs (or a first-week request) → generation is unchanged.
+  let retarget = null;
+  if (value.startDay > 1 && value.currentWeightKg) {
+    retarget = decideRetarget({
+      startWeightKg: value.weightKg,
+      currentWeightKg: value.currentWeightKg,
+      heightCm: value.heightCm,
+      age: value.age,
+      sex: value.sex,
+      activityLevel: value.activityLevel,
+      goal: value.goal,
+      targetWeightKg: value.targetWeightKg,
+      targetDays: value.targetDays,
+      startDay: value.startDay,
+      weighIns: value.weighIns,
+    });
+    value.calorieOverride = retarget.newTarget; // generatePlan builds around this
+    console.log(
+      `[plan] re-target: ${value.currentWeightKg}kg → ${retarget.newTarget} kcal/day ` +
+        `(${retarget.reason}, trend ${retarget.trendKgPerWeek ?? 'n/a'} kg/wk)`,
+    );
+    // Best-effort audit — only when the plan is already synced server-side and
+    // the move is meaningful. A missing plan row (sync not built yet) is a no-op.
+    if (value.planId && retarget.changed) {
+      try {
+        await applyRetarget(req.user.id, value.planId, {
+          atDayIndex: value.startDay - 1,
+          observedWeightKg: retarget.observedWeightKg,
+          trendKgPerWeek: retarget.trendKgPerWeek,
+          newTarget: retarget.newTarget,
+          macros: retarget.macros,
+          reason: retarget.reason,
+        });
+      } catch (e) {
+        console.warn('[plan] re-target audit write skipped:', e.message);
+      }
+    }
+  }
+
   try {
     const result = await generatePlan(value);
+    if (retarget) result.meta.retarget = retarget; // let the client explain the change
     const secs = ((Date.now() - started) / 1000).toFixed(1);
     const after = await getEntitlements(req.user.id);
     console.log(`[plan] → responded 200 in ${secs}s (${result.plan?.days?.length ?? 0} days) · credits=${after.credits}`);

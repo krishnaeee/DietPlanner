@@ -979,10 +979,17 @@ class _PlanViewState extends State<_PlanView> {
         .toSet()
         .toList();
 
+    // Adaptive re-target inputs: the backend re-paces the next week to the
+    // user's latest weigh-in (only acts when there's a weigh-in and startDay>1).
+    final latest = _tracking.latestWeight;
     final body = <String, dynamic>{
       ...req,
       'startDay': nextStart,
       'avoidDishes': recent,
+      'planId': _sp.id,
+      'currentWeightKg': ?latest,
+      if (_tracking.weighIns.isNotEmpty)
+        'weighIns': _tracking.weighIns.map((w) => w.toJson()).toList(),
     };
 
     setState(() => _extending = true);
@@ -995,8 +1002,16 @@ class _PlanViewState extends State<_PlanView> {
             content: Text('No more days were returned. Try again.')));
         return;
       }
-      final merged = _plan.withAppendedDays(batch.days);
+      // Adopt any re-targeted calorie/macro numbers the batch came back with.
+      final merged = _plan.withAppendedDays(
+        batch.days,
+        dailyCalorieTarget: batch.dailyCalorieTarget,
+        dailyProteinTarget: batch.dailyProteinTarget,
+        dailyCarbsTarget: batch.dailyCarbsTarget,
+        dailyFatTarget: batch.dailyFatTarget,
+      );
       final added = merged.days.length - _plan.days.length;
+      final retargeted = merged.dailyCalorieTarget != _plan.dailyCalorieTarget;
       await PlanStorage.upsert(_sp.copyWith(plan: merged));
       // Extend reminders over the new days when they're enabled.
       final refreshed =
@@ -1008,8 +1023,10 @@ class _PlanViewState extends State<_PlanView> {
         _extending = false;
       });
       messenger.showSnackBar(SnackBar(
-        content: Text('Added $added days — '
-            '${merged.days.length} of ${merged.requestedDays} ready.'),
+        content: Text(retargeted
+            ? 'Added $added days · target now ${merged.dailyCalorieTarget} kcal/day'
+            : 'Added $added days — '
+                '${merged.days.length} of ${merged.requestedDays} ready.'),
       ));
     } on PaymentRequiredException catch (e) {
       if (!mounted) return;

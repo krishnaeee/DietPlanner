@@ -155,7 +155,19 @@ class DietPlan {
   /// to M" instruction and renumbers from 1; trusting its numbers would create
   /// duplicate day numbers and stall the "next start" cursor (re-requesting the
   /// same week forever). Renumbering here makes the merge robust regardless.
-  DietPlan withAppendedDays(List<DayPlan> more) {
+  ///
+  /// The optional daily-target overrides let the plan **adopt a re-targeted**
+  /// calorie/macro number from the new batch (the adaptive re-target loop moves
+  /// it as the user's weight changes). When omitted or non-positive, the current
+  /// targets are kept — so a normal extend, which returns the same numbers, is a
+  /// no-op on the targets.
+  DietPlan withAppendedDays(
+    List<DayPlan> more, {
+    int? dailyCalorieTarget,
+    int? dailyProteinTarget,
+    int? dailyCarbsTarget,
+    int? dailyFatTarget,
+  }) {
     final room = requestedDays - days.length;
     final take = room > 0 ? more.take(room) : const <DayPlan>[];
     var nextDay = days.isEmpty ? 1 : days.last.day + 1;
@@ -167,12 +179,13 @@ class DietPlan {
             ))
         .toList();
     final all = [...days, ...renumbered];
+    int keep(int? next, int current) => (next != null && next > 0) ? next : current;
     return DietPlan(
       summary: summary,
-      dailyCalorieTarget: dailyCalorieTarget,
-      dailyProteinTarget: dailyProteinTarget,
-      dailyCarbsTarget: dailyCarbsTarget,
-      dailyFatTarget: dailyFatTarget,
+      dailyCalorieTarget: keep(dailyCalorieTarget, this.dailyCalorieTarget),
+      dailyProteinTarget: keep(dailyProteinTarget, this.dailyProteinTarget),
+      dailyCarbsTarget: keep(dailyCarbsTarget, this.dailyCarbsTarget),
+      dailyFatTarget: keep(dailyFatTarget, this.dailyFatTarget),
       days: all,
       requestedDays: requestedDays,
       plannedDays: all.length,
