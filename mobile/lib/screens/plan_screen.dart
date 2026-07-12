@@ -508,11 +508,12 @@ class _PlanViewState extends State<_PlanView> {
   }
 
   /// Right after a plan is generated, offer to set reminders via a centered
-  /// dialog (only for freshly generated plans that don't already have them,
-  /// and only when the app-level master switch is on).
+  /// dialog (for freshly generated plans that don't already have them). Shown
+  /// even when the app-level master switch is off — tapping "Set reminders"
+  /// re-enables it (see [_enableAllReminders]), so the popup doubles as the
+  /// re-enable path rather than silently vanishing.
   void _maybeShowReminderPrompt() {
     if (!widget.justGenerated || _scheduled) return;
-    if (!NotificationService.instance.remindersEnabled.value) return;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final set = await showDialog<bool>(
@@ -537,6 +538,10 @@ class _PlanViewState extends State<_PlanView> {
       ));
       return;
     }
+    // Re-enable the app-level master switch if it was off — otherwise scheduling
+    // is gated (rescheduleAll checks it) and nothing would fire for this plan.
+    await NotificationService.instance.setRemindersEnabled(true);
+    if (!mounted) return;
     // Meal/grocery reminders + repeat on the plan; water reminders in tracking.
     await PlanStorage.upsert(
         _sp.copyWith(remindersScheduled: true, repeatForever: true));
