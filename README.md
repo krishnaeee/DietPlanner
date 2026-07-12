@@ -56,6 +56,10 @@ curl -s http://localhost:3000/api/plan \
 set `claude-sonnet-4-6`/`claude-haiku-4-5` for cheaper/faster), `EFFORT`,
 `MAX_TOKENS`, `MAX_PLAN_DAYS` (default 14 — the most days detailed per call).
 
+> **Hosting / cold starts:** the backend runs on Render (free) with Neon Postgres.
+> See [DEPLOYMENT.md](DEPLOYMENT.md) for how the cron keep-alive avoids the
+> free-tier cold start and for DB storage limits/alternatives.
+
 ### API contract
 
 `POST /api/plan`

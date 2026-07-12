@@ -59,6 +59,107 @@ await pool.query(
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_provider_ref ON transactions(provider_ref) WHERE provider_ref IS NOT NULL',
 );
 
+// ─────────────────────────────────────────────────── plans + tracking ──
+// Server-side home for each user's plans and the tracked reality the adaptive
+// re-targeting loop reads. `plan`/`request` (JSONB) are the artifact — enough
+// for any device to re-render the menu — while the flat columns beside them are
+// the queryable state the engine reasons over. current_calorie_target is the
+// single column re-targeting rewrites (see applyRetarget below).
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS plans (
+    id                     TEXT PRIMARY KEY,                                     -- client-generated StoredPlan.id
+    user_id                INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slot                   INTEGER NOT NULL,                                     -- notification-id namespacing
+    name                   TEXT NOT NULL,
+    plan                   JSONB NOT NULL,                                       -- DietPlan.toResponseJson() (all days/meals/ingredients)
+    request                JSONB,                                               -- original /api/plan body, for extend
+    goal                   TEXT NOT NULL,                                       -- lose | gain | maintain
+    height_cm              NUMERIC(5,1),
+    age                    INTEGER,
+    sex                    TEXT,
+    activity_level         TEXT,
+    start_weight_kg        NUMERIC(5,2),
+    target_weight_kg       NUMERIC(5,2),
+    target_days            INTEGER NOT NULL,
+    planned_days           INTEGER NOT NULL DEFAULT 0,
+    start_date             DATE,                                                -- calendar date of Day 1
+    location               TEXT,
+    dietary_preference     TEXT,
+    current_calorie_target INTEGER,                                             -- owned by the re-target loop after creation
+    current_macros         JSONB,
+    reminders_scheduled    BOOLEAN NOT NULL DEFAULT false,
+    repeat_forever         BOOLEAN NOT NULL DEFAULT false,
+    water_goal             INTEGER NOT NULL DEFAULT 8,
+    water_reminders_on     BOOLEAN NOT NULL DEFAULT false,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, slot)
+  );
+`);
+await pool.query('CREATE INDEX IF NOT EXISTS idx_plans_user ON plans(user_id)');
+
+// The weight signal — one row per calendar day per plan (matches the client's
+// replace-by-day withWeighIn). user_id is denormalized so "all of a user's
+// weigh-ins" needs no join.
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS weighins (
+    id          BIGSERIAL PRIMARY KEY,
+    plan_id     TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    measured_on DATE NOT NULL,
+    weight_kg   NUMERIC(5,2) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (plan_id, measured_on)
+  );
+`);
+await pool.query('CREATE INDEX IF NOT EXISTS idx_weighins_plan ON weighins(plan_id, measured_on)');
+
+// The adherence signal — today the client's mealsDone booleans. status +
+// eaten_calories are the seam for real off-plan intake logging later.
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS meal_log (
+    id             BIGSERIAL PRIMARY KEY,
+    plan_id        TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day_index      INTEGER NOT NULL,                                            -- 0-based plan day
+    meal_index     INTEGER NOT NULL,                                            -- 0-based meal
+    status         TEXT NOT NULL DEFAULT 'eaten',                              -- eaten | skipped | swapped | offplan
+    eaten_calories INTEGER,                                                     -- NULL = the plan's own number
+    logged_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (plan_id, day_index, meal_index)
+  );
+`);
+await pool.query('CREATE INDEX IF NOT EXISTS idx_meal_log_plan ON meal_log(plan_id)');
+
+// Daily hydration — one row per day per plan (matches the client's waterByDate).
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS water_log (
+    plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day     DATE NOT NULL,
+    glasses INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (plan_id, day)
+  );
+`);
+
+// Audit ledger of every adaptive re-target decision — same philosophy as
+// `transactions`: makes the coach's course-corrections explainable.
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS retarget_events (
+    id                 BIGSERIAL PRIMARY KEY,
+    plan_id            TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    at_day_index       INTEGER,
+    observed_weight_kg NUMERIC(5,2),
+    trend_kg_per_week  NUMERIC(4,2),
+    old_target         INTEGER,
+    new_target         INTEGER,
+    reason             TEXT,                                                    -- plateau | too_fast | on_track | scheduled
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+`);
+await pool.query('CREATE INDEX IF NOT EXISTS idx_retarget_plan ON retarget_events(plan_id)');
+
 // ─────────────────────────────────────────────────────────────── users ──
 
 export async function createUser(email, passwordHash) {
@@ -201,6 +302,233 @@ export async function activateSubscription(userId, periodMs, meta = {}) {
     ]);
     return { applied: true, ...(await getEntitlements(userId, client)) };
   });
+}
+
+// ─────────────────────────────────────────────────── plans + tracking ──
+
+// snake_case DB row → the camelCase plan shape the client/engine expects.
+function mapPlanRow(r) {
+  if (!r) return undefined;
+  const num = (v) => (v == null ? null : Number(v));
+  return {
+    id: r.id,
+    slot: r.slot,
+    name: r.name,
+    plan: r.plan,
+    request: r.request,
+    goal: r.goal,
+    heightCm: num(r.height_cm),
+    age: r.age,
+    sex: r.sex,
+    activityLevel: r.activity_level,
+    startWeightKg: num(r.start_weight_kg),
+    targetWeightKg: num(r.target_weight_kg),
+    targetDays: r.target_days,
+    plannedDays: r.planned_days,
+    startDate: r.start_date,
+    location: r.location,
+    dietaryPreference: r.dietary_preference,
+    currentCalorieTarget: r.current_calorie_target,
+    currentMacros: r.current_macros,
+    remindersScheduled: r.reminders_scheduled,
+    repeatForever: r.repeat_forever,
+    waterGoal: r.water_goal,
+    waterRemindersOn: r.water_reminders_on,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+/// Insert or update a plan, idempotent on the client-supplied id. The whole menu
+/// rides in `plan` (JSONB); the flat columns are the queryable state. On UPDATE
+/// the loop-owned columns (current_calorie_target/current_macros) are NOT
+/// overwritten — the client seeds them on first insert, applyRetarget owns them
+/// thereafter — and the WHERE guards that the row belongs to this user.
+export async function upsertPlan(userId, p) {
+  const planJson = JSON.stringify(p.plan ?? {});
+  const requestJson = p.request != null ? JSON.stringify(p.request) : null;
+  const macrosJson = p.currentMacros != null ? JSON.stringify(p.currentMacros) : null;
+  const { rows } = await pool.query(
+    `INSERT INTO plans (
+        id, user_id, slot, name, plan, request, goal, height_cm, age, sex,
+        activity_level, start_weight_kg, target_weight_kg, target_days,
+        planned_days, start_date, location, dietary_preference,
+        current_calorie_target, current_macros, reminders_scheduled,
+        repeat_forever, water_goal, water_reminders_on)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        plan = EXCLUDED.plan,
+        request = EXCLUDED.request,
+        goal = EXCLUDED.goal,
+        height_cm = EXCLUDED.height_cm,
+        age = EXCLUDED.age,
+        sex = EXCLUDED.sex,
+        activity_level = EXCLUDED.activity_level,
+        start_weight_kg = EXCLUDED.start_weight_kg,
+        target_weight_kg = EXCLUDED.target_weight_kg,
+        target_days = EXCLUDED.target_days,
+        planned_days = EXCLUDED.planned_days,
+        start_date = EXCLUDED.start_date,
+        location = EXCLUDED.location,
+        dietary_preference = EXCLUDED.dietary_preference,
+        reminders_scheduled = EXCLUDED.reminders_scheduled,
+        repeat_forever = EXCLUDED.repeat_forever,
+        water_goal = EXCLUDED.water_goal,
+        water_reminders_on = EXCLUDED.water_reminders_on,
+        updated_at = now()
+      WHERE plans.user_id = $2
+      RETURNING *`,
+    [
+      p.id, userId, p.slot, p.name, planJson, requestJson, p.goal,
+      p.heightCm ?? null, p.age ?? null, p.sex ?? null, p.activityLevel ?? null,
+      p.startWeightKg ?? null, p.targetWeightKg ?? null, p.targetDays,
+      p.plannedDays ?? 0, p.startDate ?? null, p.location ?? null,
+      p.dietaryPreference ?? null, p.currentCalorieTarget ?? null, macrosJson,
+      p.remindersScheduled ?? false, p.repeatForever ?? false,
+      p.waterGoal ?? 8, p.waterRemindersOn ?? false,
+    ],
+  );
+  return mapPlanRow(rows[0]);
+}
+
+/// All of a user's plans, ordered by slot.
+export async function listPlans(userId) {
+  const { rows } = await pool.query(
+    'SELECT * FROM plans WHERE user_id = $1 ORDER BY slot',
+    [userId],
+  );
+  return rows.map(mapPlanRow);
+}
+
+/// One plan, scoped to its owner (undefined when not found / not theirs).
+export async function getPlan(userId, planId) {
+  const { rows } = await pool.query(
+    'SELECT * FROM plans WHERE id = $1 AND user_id = $2',
+    [planId, userId],
+  );
+  return mapPlanRow(rows[0]);
+}
+
+/// Deletes a plan (children cascade). Scoped so one user can't delete another's.
+export async function deletePlan(userId, planId) {
+  const res = await pool.query(
+    'DELETE FROM plans WHERE id = $1 AND user_id = $2',
+    [planId, userId],
+  );
+  return res.rowCount > 0;
+}
+
+/// Upserts the weigh-in for a calendar day (one per day per plan). The INSERT …
+/// SELECT WHERE EXISTS makes it a no-op unless planId belongs to userId, so a
+/// caller can't write into someone else's plan. [measuredOn] is a yyyy-mm-dd
+/// string. Returns true when a row was written.
+export async function recordWeighIn(userId, planId, measuredOn, weightKg) {
+  const { rows } = await pool.query(
+    `INSERT INTO weighins (plan_id, user_id, measured_on, weight_kg)
+       SELECT $1, $2, $3, $4
+        WHERE EXISTS (SELECT 1 FROM plans WHERE id = $1 AND user_id = $2)
+     ON CONFLICT (plan_id, measured_on)
+       DO UPDATE SET weight_kg = EXCLUDED.weight_kg, created_at = now()
+     RETURNING id`,
+    [planId, userId, measuredOn, weightKg],
+  );
+  return rows.length > 0;
+}
+
+/// A plan's weigh-in series, oldest → newest, in the client's {date, kg} shape.
+export async function listWeighIns(userId, planId) {
+  const { rows } = await pool.query(
+    `SELECT measured_on, weight_kg FROM weighins
+       WHERE plan_id = $1 AND user_id = $2 ORDER BY measured_on`,
+    [planId, userId],
+  );
+  return rows.map((r) => ({ date: r.measured_on, kg: Number(r.weight_kg) }));
+}
+
+/// Replaces a plan's meal-adherence set with [meals] (each {dayIndex, mealIndex,
+/// status?, eatenCalories?}), mirroring the client's mealsDone set. Delete-then-
+/// insert inside one transaction so a partial sync can't leave a torn state; the
+/// ownership check makes the whole thing a no-op for a foreign plan.
+export async function syncMealLog(userId, planId, meals) {
+  return inTx(async (client) => {
+    const owned = await client.query(
+      'SELECT 1 FROM plans WHERE id = $1 AND user_id = $2',
+      [planId, userId],
+    );
+    if (!owned.rowCount) return false;
+    await client.query('DELETE FROM meal_log WHERE plan_id = $1', [planId]);
+    for (const m of meals) {
+      await client.query(
+        `INSERT INTO meal_log (plan_id, user_id, day_index, meal_index, status, eaten_calories)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (plan_id, day_index, meal_index) DO NOTHING`,
+        [planId, userId, m.dayIndex, m.mealIndex, m.status ?? 'eaten', m.eatenCalories ?? null],
+      );
+    }
+    return true;
+  });
+}
+
+/// Sets the glass count for a calendar day (clamped at 0). Ownership-guarded like
+/// recordWeighIn. [day] is a yyyy-mm-dd string.
+export async function setWater(userId, planId, day, glasses) {
+  const { rows } = await pool.query(
+    `INSERT INTO water_log (plan_id, user_id, day, glasses)
+       SELECT $1, $2, $3, $4
+        WHERE EXISTS (SELECT 1 FROM plans WHERE id = $1 AND user_id = $2)
+     ON CONFLICT (plan_id, day) DO UPDATE SET glasses = EXCLUDED.glasses
+     RETURNING plan_id`,
+    [planId, userId, day, glasses < 0 ? 0 : glasses],
+  );
+  return rows.length > 0;
+}
+
+/// The coach's write: atomically move a plan's live calorie/macro target and
+/// record why in retarget_events. Like spend/ledger, the target change and its
+/// audit row commit together or not at all. The row is locked FOR UPDATE so a
+/// concurrent re-target can't race. Returns { ok, oldTarget, newTarget }.
+export async function applyRetarget(userId, planId, ev) {
+  return inTx(async (client) => {
+    const { rows } = await client.query(
+      'SELECT current_calorie_target FROM plans WHERE id = $1 AND user_id = $2 FOR UPDATE',
+      [planId, userId],
+    );
+    if (!rows[0]) return { ok: false };
+    const oldTarget = rows[0].current_calorie_target;
+    await client.query(
+      `UPDATE plans
+          SET current_calorie_target = $1,
+              current_macros = COALESCE($2, current_macros),
+              updated_at = now()
+        WHERE id = $3`,
+      [ev.newTarget, ev.macros != null ? JSON.stringify(ev.macros) : null, planId],
+    );
+    await client.query(
+      `INSERT INTO retarget_events
+         (plan_id, user_id, at_day_index, observed_weight_kg, trend_kg_per_week, old_target, new_target, reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        planId, userId, ev.atDayIndex ?? null, ev.observedWeightKg ?? null,
+        ev.trendKgPerWeek ?? null, oldTarget, ev.newTarget, ev.reason ?? null,
+      ],
+    );
+    return { ok: true, oldTarget, newTarget: ev.newTarget };
+  });
+}
+
+/// Everything the weekly re-target engine needs for one plan, in a single call:
+/// the state slice, the weigh-in series (oldest → newest), and how many planned
+/// meals have been marked eaten. Read-only.
+export async function getAdaptiveInputs(userId, planId) {
+  const plan = await getPlan(userId, planId);
+  if (!plan) return undefined;
+  const weighIns = await listWeighIns(userId, planId);
+  const { rows } = await pool.query(
+    "SELECT count(*)::int AS eaten FROM meal_log WHERE plan_id = $1 AND status = 'eaten'",
+    [planId],
+  );
+  return { plan, weighIns, mealsEaten: rows[0].eaten };
 }
 
 export default pool;
