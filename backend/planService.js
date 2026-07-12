@@ -1,5 +1,6 @@
 import { buildPrompt, buildMealPrompt, MEAL_SCHEMA } from './planSchema.js';
 import { getProvider } from './providers.js';
+import { computeTargets } from './tdee.js';
 
 // EFFORT only applies to providers that support reasoning effort (Anthropic);
 // others ignore it. MODEL overrides the active provider's default model.
@@ -34,7 +35,17 @@ export async function generatePlan(input) {
   const startDay = Math.max(1, Math.round(input.startDay || 1));
   const remaining = Math.max(1, input.targetDays - (startDay - 1));
   const plannedDays = Math.min(remaining, MAX_PLAN_DAYS);
-  const { system, user } = buildPrompt({ ...input, startDay }, plannedDays);
+
+  // Deterministic energy/macro target — the authoritative number the plan is
+  // built around. `input.calorieOverride` (set by the weekly re-target loop)
+  // wins over the goal math when present.
+  const targets = computeTargets(input);
+  console.log(
+    `[gen] targets: BMR ${targets.bmr} · TDEE ${targets.tdee} · ${targets.calorieTarget} kcal/day ` +
+      `(${targets.goal}, ${targets.rateKgPerWeek} kg/wk)${targets.warnings.length ? ' ⚠ ' + targets.warnings.join(' ') : ''}`,
+  );
+
+  const { system, user } = buildPrompt({ ...input, startDay, targets }, plannedDays);
   const provider = getProvider();
 
   console.log(
@@ -70,6 +81,14 @@ export async function generatePlan(input) {
   }
   console.log(`[gen] parsed ${plan?.days?.length ?? 0} day(s) OK`);
 
+  // Overwrite the model's guessed daily targets with the deterministic ones, so
+  // the stored/displayed numbers are correct and reproducible regardless of what
+  // the LLM returned. The model only owns the meals; the engine owns the target.
+  plan.dailyCalorieTarget = targets.calorieTarget;
+  plan.dailyProteinTarget = targets.macros.protein;
+  plan.dailyCarbsTarget = targets.macros.carbs;
+  plan.dailyFatTarget = targets.macros.fat;
+
   return {
     plan,
     meta: {
@@ -80,6 +99,13 @@ export async function generatePlan(input) {
       truncated: startDay - 1 + plannedDays < input.targetDays,
       provider: provider.name,
       model: provider.model,
+      // The engine's computed anchor — the client seeds current_calorie_target
+      // from this and can show BMR/TDEE and any safety note.
+      bmr: targets.bmr,
+      tdee: targets.tdee,
+      calorieTarget: targets.calorieTarget,
+      rateKgPerWeek: targets.rateKgPerWeek,
+      targetWarnings: targets.warnings,
     },
   };
 }

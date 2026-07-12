@@ -1,3 +1,5 @@
+import { computeTargets } from './tdee.js';
+
 // JSON Schema for the structured diet-plan response Claude must return.
 // Shaped so the (next-pass) mobile storage layer can persist each day's meals
 // and ingredients directly. Structured-output rules: every object sets
@@ -117,6 +119,12 @@ export function buildPrompt(input, plannedDays) {
   const endDay = startDay + plannedDays - 1;
   const isContinuation = startDay > 1;
 
+  // Deterministic energy target (Mifflin-St Jeor → TDEE → goal-adjusted, safety
+  // clamped). generatePlan passes it in precomputed; compute here if called
+  // standalone. This is the authoritative number — the model builds meals to
+  // hit it rather than guessing its own.
+  const targets = input.targets || computeTargets(input);
+
   const system =
     'You are a registered dietitian and meal planner. You design realistic, ' +
     'nutritionally balanced diet plans that respect safe rates of weight change ' +
@@ -154,8 +162,17 @@ export function buildPrompt(input, plannedDays) {
     : `Current weight: ${weightKg} kg\nTarget weight: ${targetWeightKg} kg (goal: ${resolvedGoal} weight)`;
 
   const calorieLine = isMaintain
-    ? `- Choose a MAINTENANCE daily calorie target (roughly the user's TDEE for their stats and activity) so weight stays stable — do NOT create a calorie deficit or surplus. Focus on balanced, nutritious, wholesome meals.`
-    : `- Choose a daily calorie target that moves the user safely toward the target weight over the full ${targetDays}-day period. If the target is not safely achievable in that time, plan for the safe maximum instead and explain this in the summary.`;
+    ? `- Build every day around EXACTLY ${targets.calorieTarget} kcal/day — the user's maintenance TDEE. Do NOT create a deficit or surplus. Focus on balanced, nutritious, wholesome meals.`
+    : `- Build every day around EXACTLY ${targets.calorieTarget} kcal/day. This is the pre-computed, safety-checked target for this goal and period — do NOT choose a different number.`;
+
+  const macroLine =
+    `- Use these daily macro targets and distribute them across the day's meals: ` +
+    `protein ${targets.macros.protein} g, carbs ${targets.macros.carbs} g, fat ${targets.macros.fat} g. ` +
+    `Return these exact numbers as dailyProteinTarget / dailyCarbsTarget / dailyFatTarget and ${targets.calorieTarget} as dailyCalorieTarget.`;
+
+  const summaryNote = targets.warnings.length
+    ? `\n- Tell the user this in the summary: ${targets.warnings.join(' ')}`
+    : '';
 
   const user = `Create a personalised diet plan with these details:
 
@@ -171,8 +188,8 @@ Requirements:
 - Vary the dishes across days so the plan does not get repetitive.${avoidLine}
 - For every meal, list its ingredients with realistic shopping quantities.
 - For every meal, give realistic calories and macros (protein, carbs, fat in grams). Each day's meal calories should add up close to the daily calorie target.
-- Also provide daily protein/carbs/fat targets that are consistent with the calorie target (protein and carbs ≈ 4 kcal/g, fat ≈ 9 kcal/g) and include enough protein to support the user's goal.
-${calorieLine}`;
+${calorieLine}
+${macroLine}${summaryNote}`;
 
   return { system, user };
 }
