@@ -5,6 +5,7 @@ import { generatePlan, generateMeal, MAX_PLAN_DAYS } from './planService.js';
 import { describeProvider } from './providers.js';
 import { authRouter, requireAuth } from './auth.js';
 import { billingRouter, stripeWebhookHandler } from './billingRoutes.js';
+import { plansRouter } from './plansRoutes.js';
 import { getEntitlements, spendCredits, addCredits, applyRetarget, pool } from './db.js';
 import { decideRetarget } from './retarget.js';
 import { BILLING_PROVIDER, CURRENCY } from './billing.js';
@@ -34,6 +35,8 @@ const VERSION = {
 app.use('/api/auth', authRouter);
 // Billing: balance/catalog, checkout, return page.
 app.use('/api/billing', billingRouter);
+// Plans + tracking sync (durable, multi-device).
+app.use('/api/plans', plansRouter);
 
 const SEXES = ['male', 'female', 'other'];
 const ACTIVITY = ['sedentary', 'light', 'moderate', 'active', 'very_active'];

@@ -531,4 +531,37 @@ export async function getAdaptiveInputs(userId, planId) {
   return { plan, weighIns, mealsEaten: rows[0].eaten };
 }
 
+/// A plan's full tracking in the client's PlanTracking shape, for restoring on a
+/// new device: weigh-ins ({date,kg}), the done-meal set ("day:meal"), water by
+/// day, and the plan-level water settings. Dates come back as yyyy-mm-dd strings
+/// (to_char, so no timezone drift). undefined when the plan isn't the user's.
+export async function getTracking(userId, planId) {
+  const { rows: prow } = await pool.query(
+    'SELECT water_goal, water_reminders_on FROM plans WHERE id = $1 AND user_id = $2',
+    [planId, userId],
+  );
+  if (!prow[0]) return undefined;
+  const { rows: w } = await pool.query(
+    "SELECT to_char(measured_on,'YYYY-MM-DD') AS d, weight_kg FROM weighins WHERE plan_id = $1 ORDER BY measured_on",
+    [planId],
+  );
+  const { rows: m } = await pool.query(
+    "SELECT day_index, meal_index FROM meal_log WHERE plan_id = $1 AND status = 'eaten' ORDER BY day_index, meal_index",
+    [planId],
+  );
+  const { rows: wa } = await pool.query(
+    "SELECT to_char(day,'YYYY-MM-DD') AS d, glasses FROM water_log WHERE plan_id = $1",
+    [planId],
+  );
+  const waterByDate = {};
+  for (const r of wa) waterByDate[r.d] = r.glasses;
+  return {
+    weighIns: w.map((r) => ({ date: r.d, kg: Number(r.weight_kg) })),
+    mealsDone: m.map((r) => `${r.day_index}:${r.meal_index}`),
+    waterByDate,
+    waterGoal: prow[0].water_goal,
+    waterRemindersOn: prow[0].water_reminders_on,
+  };
+}
+
 export default pool;
