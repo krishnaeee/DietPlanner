@@ -56,7 +56,7 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.3
 
-# Launcher icon — the ilAI mark (full-bleed coral gradient, white leaf +
+# Launcher icon — the DietME mark (full-bleed coral gradient, white leaf +
 # three-star sparkle). Sources rendered by assets/icon/make_icon.py.
 # Regenerate with: dart run flutter_launcher_icons
 flutter_launcher_icons:
