@@ -82,12 +82,19 @@ plansRouter.put('/:id/tracking', async (req, res) => {
       }
     }
   }
-  if (Array.isArray(b.mealsDone)) {
-    const meals = b.mealsDone
-      .map((k) => String(k).split(':'))
-      .filter((p) => p.length === 2)
-      .map((p) => ({ dayIndex: Number(p[0]), mealIndex: Number(p[1]) }))
-      .filter((m) => Number.isInteger(m.dayIndex) && Number.isInteger(m.mealIndex));
+  // Eaten and explicitly-skipped meals sync together as one snapshot, so the
+  // server holds the full resolved set (delete-then-insert inside syncMealLog).
+  if (Array.isArray(b.mealsDone) || Array.isArray(b.mealsSkipped)) {
+    const toMeals = (arr, status) =>
+      (Array.isArray(arr) ? arr : [])
+        .map((k) => String(k).split(':'))
+        .filter((p) => p.length === 2)
+        .map((p) => ({ dayIndex: Number(p[0]), mealIndex: Number(p[1]), status }))
+        .filter((m) => Number.isInteger(m.dayIndex) && Number.isInteger(m.mealIndex));
+    const meals = [
+      ...toMeals(b.mealsDone, 'eaten'),
+      ...toMeals(b.mealsSkipped, 'skipped'),
+    ];
     await syncMealLog(req.user.id, id, meals);
   }
   if (b.waterByDate && typeof b.waterByDate === 'object') {

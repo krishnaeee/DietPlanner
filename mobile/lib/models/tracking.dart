@@ -89,6 +89,11 @@ class PlanTracking {
   /// Completed meals, keyed `"<dayIndex>:<mealIndex>"` (both 0-based).
   final Set<String> mealsDone;
 
+  /// Meals the user explicitly marked as NOT eaten, keyed like [mealsDone].
+  /// Mutually exclusive with [mealsDone]: a "resolved" meal is in one set or the
+  /// other. Skipping counts as engagement (keeps a streak) but not as adherence.
+  final Set<String> mealsSkipped;
+
   /// Glasses of water drunk, keyed by [dateKey].
   final Map<String, int> waterByDate;
 
@@ -104,6 +109,7 @@ class PlanTracking {
   PlanTracking({
     this.weighIns = const [],
     this.mealsDone = const {},
+    this.mealsSkipped = const {},
     this.waterByDate = const {},
     this.waterGoal = 8,
     this.waterRemindersOn = false,
@@ -113,6 +119,7 @@ class PlanTracking {
   PlanTracking copyWith({
     List<WeighIn>? weighIns,
     Set<String>? mealsDone,
+    Set<String>? mealsSkipped,
     Map<String, int>? waterByDate,
     int? waterGoal,
     bool? waterRemindersOn,
@@ -121,6 +128,7 @@ class PlanTracking {
       PlanTracking(
         weighIns: weighIns ?? this.weighIns,
         mealsDone: mealsDone ?? this.mealsDone,
+        mealsSkipped: mealsSkipped ?? this.mealsSkipped,
         waterByDate: waterByDate ?? this.waterByDate,
         waterGoal: waterGoal ?? this.waterGoal,
         waterRemindersOn: waterRemindersOn ?? this.waterRemindersOn,
@@ -130,6 +138,13 @@ class PlanTracking {
   // ───────────────────────────────────────────────────────── reads ──
 
   bool isMealDone(int day, int meal) => mealsDone.contains('$day:$meal');
+
+  bool isMealSkipped(int day, int meal) => mealsSkipped.contains('$day:$meal');
+
+  /// A meal is "resolved" once it's been either eaten or skipped — used so
+  /// "Up next" moves on and the day can still reach "All done".
+  bool isMealResolved(int day, int meal) =>
+      isMealDone(day, meal) || isMealSkipped(day, meal);
 
   int waterFor(DateTime d) => waterByDate[dateKey(d)] ?? 0;
 
@@ -157,12 +172,31 @@ class PlanTracking {
 
   // ──────────────────────────────────────────────────────── writes ──
 
-  /// Toggles a meal's completion and returns the updated tracking.
+  /// Toggles a meal's completion. Marking it eaten clears any "skipped" flag —
+  /// the two states are mutually exclusive.
   PlanTracking toggleMeal(int day, int meal) {
     final key = '$day:$meal';
-    final next = Set<String>.from(mealsDone);
-    if (!next.remove(key)) next.add(key);
-    return copyWith(mealsDone: next);
+    final done = Set<String>.from(mealsDone);
+    final skipped = Set<String>.from(mealsSkipped);
+    if (done.remove(key)) {
+      return copyWith(mealsDone: done);
+    }
+    done.add(key);
+    skipped.remove(key);
+    return copyWith(mealsDone: done, mealsSkipped: skipped);
+  }
+
+  /// Toggles a meal's "didn't eat" flag. Marking it skipped clears "eaten".
+  PlanTracking toggleSkip(int day, int meal) {
+    final key = '$day:$meal';
+    final done = Set<String>.from(mealsDone);
+    final skipped = Set<String>.from(mealsSkipped);
+    if (skipped.remove(key)) {
+      return copyWith(mealsSkipped: skipped);
+    }
+    skipped.add(key);
+    done.remove(key);
+    return copyWith(mealsDone: done, mealsSkipped: skipped);
   }
 
   /// Records (or replaces) the weigh-in for [date]'s calendar day.
@@ -201,7 +235,7 @@ class PlanTracking {
     waterByDate.forEach((k, v) {
       if (v > 0) days.add(k);
     });
-    for (final k in mealsDone) {
+    for (final k in mealsDone.followedBy(mealsSkipped)) {
       final day = int.tryParse(k.split(':').first);
       if (day == null) continue;
       final d = DateTime(startDate.year, startDate.month, startDate.day + day);
@@ -252,6 +286,7 @@ class PlanTracking {
   Map<String, dynamic> toJson() => {
         'weighIns': weighIns.map((e) => e.toJson()).toList(),
         'mealsDone': mealsDone.toList(),
+        'mealsSkipped': mealsSkipped.toList(),
         'waterByDate': waterByDate,
         'waterGoal': waterGoal,
         'waterRemindersOn': waterRemindersOn,
@@ -271,6 +306,7 @@ class PlanTracking {
     return PlanTracking(
       weighIns: weighIns,
       mealsDone: ((m['mealsDone'] as List?) ?? []).map((e) => '$e').toSet(),
+      mealsSkipped: ((m['mealsSkipped'] as List?) ?? []).map((e) => '$e').toSet(),
       waterByDate: water,
       waterGoal: m['waterGoal'] == null ? 8 : _toInt(m['waterGoal']),
       waterRemindersOn: m['waterRemindersOn'] == true,

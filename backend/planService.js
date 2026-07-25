@@ -39,6 +39,34 @@ function parsePlanJson(text) {
   }
 }
 
+// A permanent, non-retryable provider error (bad request / auth / forbidden).
+// Everything else — 429, 5xx, network blips, and our own parse/shape failures —
+// is worth one retry.
+function isPermanentError(err) {
+  const status = err?.status ?? err?.statusCode;
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 429;
+}
+
+// Minimal structural check on a generated plan: at least one day, every day has
+// meals, every meal names a dish. Catches a truncated/garbage response that
+// still parsed as JSON, so we retry instead of returning an empty plan.
+function assertPlanShape(plan) {
+  if (!plan || !Array.isArray(plan.days) || plan.days.length === 0) {
+    throw new Error('Generated plan had no days.');
+  }
+  for (const day of plan.days) {
+    const meals = day?.meals;
+    if (!Array.isArray(meals) || meals.length === 0) {
+      throw new Error('A generated plan day had no meals.');
+    }
+    for (const meal of meals) {
+      if (!meal || (!meal.dish && !meal.name)) {
+        throw new Error('A generated meal was missing its dish name.');
+      }
+    }
+  }
+}
+
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -102,35 +130,41 @@ export async function generatePlan(input) {
   console.log(
     `[gen] calling ${provider.name}:${provider.model} (effort=${EFFORT}, maxTokens=${MAX_TOKENS}) for ${plannedDays} day(s) from day ${startDay}…`,
   );
-  const t0 = Date.now();
-  // Heartbeat so you can see it's still working (vs. hung) in the console.
-  const heartbeat = setInterval(() => {
-    console.log(`[gen]   …still generating (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
-  }, 10000);
-
-  let result;
-  try {
-    result = await provider.generate({ system, user, maxTokens: MAX_TOKENS, effort: EFFORT });
-  } catch (err) {
-    clearInterval(heartbeat);
-    console.error(`[gen] ✗ ${provider.name} call failed after ${((Date.now() - t0) / 1000).toFixed(1)}s:`, err?.message);
-    throw err;
-  }
-  clearInterval(heartbeat);
-
-  const secs = ((Date.now() - t0) / 1000).toFixed(1);
-  console.log(
-    `[gen] model responded in ${secs}s — out_tokens=${result.outTokens ?? '?'}`,
-  );
-
+  // The plan call is the slowest, costliest, most failure-prone one — so give it
+  // one bounded, jittered retry. A transient provider hiccup (overload/5xx/429)
+  // or a one-off malformed/truncated response becomes a silent success instead
+  // of a multi-minute failure the user sees. Permanent errors (bad request/auth)
+  // are not retried.
+  const MAX_ATTEMPTS = 2;
   let plan;
-  try {
-    plan = parsePlanJson(result.text);
-  } catch (e) {
-    console.error('[gen] JSON parse failed. First 300 chars of output:\n', result.text.slice(0, 300));
-    throw e;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const t0 = Date.now();
+    // Heartbeat so you can see it's still working (vs. hung) in the console.
+    const heartbeat = setInterval(() => {
+      console.log(`[gen]   …still generating (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+    }, 10000);
+    try {
+      const result = await provider.generate({ system, user, maxTokens: MAX_TOKENS, effort: EFFORT });
+      clearInterval(heartbeat);
+      console.log(
+        `[gen] model responded in ${((Date.now() - t0) / 1000).toFixed(1)}s — out_tokens=${result.outTokens ?? '?'}`,
+      );
+      plan = parsePlanJson(result.text);
+      assertPlanShape(plan); // catches truncated/garbage JSON before we use it
+      console.log(`[gen] parsed ${plan.days.length} day(s) OK`);
+      break; // success
+    } catch (err) {
+      clearInterval(heartbeat);
+      const canRetry = attempt < MAX_ATTEMPTS && !isPermanentError(err);
+      console.error(
+        `[gen] ✗ attempt ${attempt}/${MAX_ATTEMPTS} failed after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${err?.message}`,
+      );
+      if (!canRetry) throw err;
+      const backoff = 400 + Math.floor(Math.random() * 700); // jittered backoff
+      console.log(`[gen] retrying in ${backoff}ms…`);
+      await new Promise((r) => setTimeout(r, backoff));
+    }
   }
-  console.log(`[gen] parsed ${plan?.days?.length ?? 0} day(s) OK`);
 
   // Overwrite the model's guessed daily targets with the deterministic ones, so
   // the stored/displayed numbers are correct and reproducible regardless of what

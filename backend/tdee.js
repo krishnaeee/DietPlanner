@@ -88,12 +88,16 @@ export function computeTargets(input) {
     const weeks = Math.max(1, targetDays / 7);
     let rate = totalDeltaKg / weeks; // kg/week magnitude
 
-    if (rate > MAX_RATE_KG_WK) {
+    // Safe ceiling: the lesser of 1 kg/week and ~1% of bodyweight, so a small
+    // user isn't paced faster than is safe for their size (1 kg/wk is ~1.8%/wk
+    // for a 55 kg person — above the recommended ceiling).
+    const maxRate = Math.min(MAX_RATE_KG_WK, 0.01 * weightKg);
+    if (rate > maxRate) {
       warnings.push(
-        `Requested ${rate.toFixed(2)} kg/week exceeds the safe ${MAX_RATE_KG_WK} kg/week; ` +
-          `planning for the safe maximum (~${(MAX_RATE_KG_WK * weeks).toFixed(1)} kg over ${targetDays} days).`,
+        `Requested ${rate.toFixed(2)} kg/week exceeds the safe ${maxRate.toFixed(2)} kg/week; ` +
+          `planning for the safe maximum (~${(maxRate * weeks).toFixed(1)} kg over ${targetDays} days).`,
       );
-      rate = MAX_RATE_KG_WK;
+      rate = maxRate;
     }
     const dailyDelta = (rate * KCAL_PER_KG) / 7; // kcal/day
     calorieTarget = Math.round(tdee + dir * dailyDelta);

@@ -641,6 +641,10 @@ export async function getTracking(userId, planId) {
     "SELECT day_index, meal_index FROM meal_log WHERE plan_id = $1 AND status = 'eaten' ORDER BY day_index, meal_index",
     [planId],
   );
+  const { rows: sk } = await pool.query(
+    "SELECT day_index, meal_index FROM meal_log WHERE plan_id = $1 AND status = 'skipped' ORDER BY day_index, meal_index",
+    [planId],
+  );
   const { rows: wa } = await pool.query(
     "SELECT to_char(day,'YYYY-MM-DD') AS d, glasses FROM water_log WHERE plan_id = $1",
     [planId],
@@ -654,6 +658,7 @@ export async function getTracking(userId, planId) {
   return {
     weighIns: w.map((r) => ({ date: r.d, kg: Number(r.weight_kg) })),
     mealsDone: m.map((r) => `${r.day_index}:${r.meal_index}`),
+    mealsSkipped: sk.map((r) => `${r.day_index}:${r.meal_index}`),
     waterByDate,
     waterGoal: prow[0].water_goal,
     waterRemindersOn: prow[0].water_reminders_on,

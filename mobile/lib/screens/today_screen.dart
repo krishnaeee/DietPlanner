@@ -33,6 +33,9 @@ class _TodayScreenState extends State<TodayScreen> {
   late StoredPlan _plan = widget.plan;
   PlanTracking _tracking = PlanTracking();
 
+  /// Whether the "yesterday's unlogged meals" recovery list is expanded.
+  bool _recoverOpen = false;
+
   @override
   void initState() {
     super.initState();
@@ -78,6 +81,14 @@ class _TodayScreenState extends State<TodayScreen> {
 
   Future<void> _toggle(int dayIndex, int mealIndex) async {
     final next = _tracking.toggleMeal(dayIndex, mealIndex);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(_plan.id, next);
+  }
+
+  /// Marks a meal as "didn't eat" (or clears it) — distinct from eaten, so a
+  /// skipped meal stops blocking "Up next" and the day can still reach "All done".
+  Future<void> _skip(int dayIndex, int mealIndex) async {
+    final next = _tracking.toggleSkip(dayIndex, mealIndex);
     setState(() => _tracking = next);
     await TrackingStorage.save(_plan.id, next);
   }
@@ -149,14 +160,26 @@ class _TodayScreenState extends State<TodayScreen> {
       c += e.carbs;
       f += e.fat;
     }
-    // The next unchecked meal — promoted as "Up next".
+    // The next unresolved meal (neither eaten nor skipped) — promoted as
+    // "Up next". Skipping a meal advances this so the day isn't stuck all day.
     var next = -1;
     for (var m = 0; m < day.meals.length; m++) {
-      if (!_tracking.isMealDone(ds.index, m)) {
+      if (!_tracking.isMealResolved(ds.index, m)) {
         next = m;
         break;
       }
     }
+
+    // Forgot-to-log recovery: yesterday's still-unresolved meals, surfaced in
+    // context so a missed check-off can be fixed without hunting the Plan tab.
+    final yIndex = ds.index - 1;
+    final hasYesterday = !ds.upcoming && yIndex >= 0 && yIndex < plan.days.length;
+    final yUnlogged = hasYesterday
+        ? [
+            for (var m = 0; m < plan.days[yIndex].meals.length; m++)
+              if (!_tracking.isMealResolved(yIndex, m)) m,
+          ]
+        : const <int>[];
 
     final now = DateTime.now();
     var micro =
@@ -238,11 +261,40 @@ class _TodayScreenState extends State<TodayScreen> {
                 _UpNextCard(
                   meal: day.meals[next],
                   onEat: () => _toggle(ds.index, next),
+                  onSkip: () => _skip(ds.index, next),
                   onTap: () => _openMeal(ds.index, next),
                 ),
                 const SizedBox(height: 16),
               ] else ...[
-                _AllDoneCard(count: day.meals.length),
+                _AllDoneCard(eaten: doneCount, total: day.meals.length),
+                const SizedBox(height: 16),
+              ],
+
+              // ── forgot-to-log recovery (yesterday's unlogged meals)
+              if (yUnlogged.isNotEmpty) ...[
+                _RecoveryCard(
+                  dayLabel: '${plan.days[yIndex].day}',
+                  count: yUnlogged.length,
+                  open: _recoverOpen,
+                  onTap: () => setState(() => _recoverOpen = !_recoverOpen),
+                ),
+                if (_recoverOpen) ...[
+                  const SizedBox(height: 10),
+                  ...List.generate(
+                    plan.days[yIndex].meals.length,
+                    (m) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: FreshMealTile(
+                        meal: plan.days[yIndex].meals[m],
+                        done: _tracking.isMealDone(yIndex, m),
+                        skipped: _tracking.isMealSkipped(yIndex, m),
+                        onToggle: () => _toggle(yIndex, m),
+                        onSkip: () => _skip(yIndex, m),
+                        onTap: () => _openMeal(yIndex, m),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
               ],
 
@@ -255,7 +307,9 @@ class _TodayScreenState extends State<TodayScreen> {
                   child: FreshMealTile(
                     meal: day.meals[m],
                     done: _tracking.isMealDone(ds.index, m),
+                    skipped: _tracking.isMealSkipped(ds.index, m),
                     onToggle: () => _toggle(ds.index, m),
+                    onSkip: () => _skip(ds.index, m),
                     onTap: () => _openMeal(ds.index, m),
                   ),
                 );
@@ -324,8 +378,13 @@ class _Micro extends StatelessWidget {
 class _UpNextCard extends StatelessWidget {
   final Meal meal;
   final VoidCallback onEat;
+  final VoidCallback onSkip;
   final VoidCallback onTap;
-  const _UpNextCard({required this.meal, required this.onEat, required this.onTap});
+  const _UpNextCard(
+      {required this.meal,
+      required this.onEat,
+      required this.onSkip,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -378,7 +437,27 @@ class _UpNextCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
+                // Secondary "didn't eat" — a ghost icon so it doesn't compete
+                // with the primary "Mark eaten" action.
+                Semantics(
+                  button: true,
+                  label: "Didn't eat",
+                  child: Tooltip(
+                    message: "Didn't eat",
+                    child: InkResponse(
+                      onTap: onSkip,
+                      radius: 24,
+                      child: SizedBox(
+                        width: 40,
+                        height: 44,
+                        child: Icon(Icons.do_not_disturb_on_outlined,
+                            color: AppColors.inkFaint, size: 22),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 2),
                 Material(
                   color: AppColors.ink,
                   borderRadius: BorderRadius.circular(30),
@@ -411,14 +490,19 @@ class _UpNextCard extends StatelessWidget {
   }
 }
 
-/// Shown when every meal of the day is checked off.
+/// Shown when every meal of the day is resolved (eaten or skipped).
 class _AllDoneCard extends StatelessWidget {
-  final int count;
-  const _AllDoneCard({required this.count});
+  final int eaten;
+  final int total;
+  const _AllDoneCard({required this.eaten, required this.total});
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final mint = MacroColors.protein;
+    final skipped = total - eaten;
+    final message = skipped == 0
+        ? 'All $total meals done — great day! 🎉'
+        : 'Day logged — $eaten eaten, $skipped skipped. Honest tracking beats a perfect-looking day. 👍';
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -428,14 +512,70 @@ class _AllDoneCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.celebration_rounded, color: mint, size: 20),
+          Icon(skipped == 0 ? Icons.celebration_rounded : Icons.check_circle_rounded,
+              color: mint, size: 20),
           const SizedBox(width: 10),
           Expanded(
-            child: Text('All $count meals done — great day! 🎉',
+            child: Text(message,
                 style: text.bodyMedium
                     ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w800)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Gentle nudge to log yesterday's meals you forgot to check off. Tapping it
+/// expands an in-place list so you never have to hunt for the right day.
+class _RecoveryCard extends StatelessWidget {
+  final String dayLabel;
+  final int count;
+  final bool open;
+  final VoidCallback onTap;
+  const _RecoveryCard({
+    required this.dayLabel,
+    required this.count,
+    required this.open,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final amber = AppColors.accent;
+    return Material(
+      color: amber.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.history_rounded, color: amber, size: 19),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Yesterday (Day $dayLabel): $count meal${count == 1 ? '' : 's'} '
+                  'unlogged — count them?',
+                  style: text.bodySmall?.copyWith(
+                      color: AppColors.ink,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3),
+                ),
+              ),
+              const SizedBox(width: 8),
+              AnimatedRotation(
+                turns: open ? 0.5 : 0,
+                duration: motion(context, 180),
+                child: Icon(Icons.expand_more_rounded,
+                    color: AppColors.inkMuted, size: 22),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -361,13 +361,17 @@ class StreakBadge extends StatelessWidget {
 class FreshMealTile extends StatelessWidget {
   final Meal meal;
   final bool done;
+  final bool skipped;
   final VoidCallback onToggle;
+  final VoidCallback? onSkip;
   final VoidCallback? onTap;
   const FreshMealTile({
     super.key,
     required this.meal,
     required this.done,
+    this.skipped = false,
     required this.onToggle,
+    this.onSkip,
     this.onTap,
   });
 
@@ -392,14 +396,18 @@ class FreshMealTile extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: Row(
               children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceHigh,
-                    borderRadius: BorderRadius.circular(12),
+                Opacity(
+                  opacity: skipped ? 0.5 : 1,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceHigh,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child:
+                        Icon(AppColors.iconForMeal(meal.name), color: color, size: 19),
                   ),
-                  child: Icon(AppColors.iconForMeal(meal.name), color: color, size: 19),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -410,11 +418,17 @@ class FreshMealTile extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: text.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w800, height: 1.15)),
+                              fontWeight: FontWeight.w800,
+                              height: 1.15,
+                              color: skipped ? AppColors.inkMuted : null,
+                              decoration:
+                                  skipped ? TextDecoration.lineThrough : null)),
                       const SizedBox(height: 2),
                       Text(
-                        '${meal.name}${meal.time.isEmpty ? '' : ' · ${meal.time}'}'
-                        '${meal.calories > 0 ? ' · ${meal.calories} kcal' : ''}',
+                        skipped
+                            ? "Didn't eat · ${meal.name}"
+                            : '${meal.name}${meal.time.isEmpty ? '' : ' · ${meal.time}'}'
+                                '${meal.calories > 0 ? ' · ${meal.calories} kcal' : ''}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: text.bodySmall
@@ -423,7 +437,9 @@ class FreshMealTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
+                if (onSkip != null) _SkipToggle(skipped: skipped, onTap: onSkip!),
+                const SizedBox(width: 2),
                 _Check(done: done, onTap: onToggle, mint: mint),
               ],
             ),
@@ -467,6 +483,42 @@ class _Check extends StatelessWidget {
               child: Icon(Icons.check_rounded,
                   size: 16,
                   color: done ? AppColors.onMint : AppColors.inkFaint),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The secondary "Didn't eat" toggle on a meal tile — a ghost icon that fills in
+/// (amber) when the meal is marked skipped. Tapping again clears it.
+class _SkipToggle extends StatelessWidget {
+  final bool skipped;
+  final VoidCallback onTap;
+  const _SkipToggle({required this.skipped, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = skipped ? 'Skipped — tap to undo' : "Didn't eat";
+    return Semantics(
+      button: true,
+      label: label,
+      child: Tooltip(
+        message: label,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 24,
+          // 44dp tap target around a 22dp icon (hitSlop), matching _Check.
+          child: SizedBox(
+            width: 40,
+            height: 44,
+            child: Icon(
+              skipped
+                  ? Icons.do_not_disturb_on
+                  : Icons.do_not_disturb_on_outlined,
+              size: 22,
+              color: skipped ? AppColors.accent : AppColors.inkFaint,
             ),
           ),
         ),
