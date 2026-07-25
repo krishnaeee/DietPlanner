@@ -11,6 +11,7 @@ import '../services/notification_service.dart';
 import '../services/plan_storage.dart';
 import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
+import '../widgets/add_extra_sheet.dart';
 import '../widgets/fresh.dart';
 import 'diet_settings_screen.dart';
 import 'grocery_list_screen.dart';
@@ -191,9 +192,9 @@ class _CookingLoader extends StatefulWidget {
 
 class _CookingLoaderState extends State<_CookingLoader>
     with SingleTickerProviderStateMixin {
+  // Not auto-repeated: build() starts the spin only when reduce-motion is off.
   late final AnimationController _rotate =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 1300))
-        ..repeat();
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1300));
   Timer? _timer;
   int _tip = 0;
 
@@ -225,6 +226,10 @@ class _CookingLoaderState extends State<_CookingLoader>
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    // Honour the OS reduce-motion setting: spin only when motion is allowed.
+    if (!reduceMotion(context) && !_rotate.isAnimating) {
+      _rotate.repeat();
+    }
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -251,7 +256,7 @@ class _CookingLoaderState extends State<_CookingLoader>
                       shape: BoxShape.circle,
                       gradient: const RadialGradient(
                         center: Alignment(-0.35, -0.4),
-                        colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
+                        colors: AppColors.orbColors,
                       ),
                       boxShadow: coralGlow(opacity: 0.20, blur: 14, y: 5),
                     ),
@@ -337,11 +342,11 @@ class _ErrorView extends StatelessWidget {
               width: 88,
               height: 88,
               decoration: BoxDecoration(
-                color: const Color(0xFFE0573E).withValues(alpha: 0.10),
+                color: AppColors.danger.withValues(alpha: 0.10),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.cloud_off_rounded,
-                  color: Color(0xFFE0573E), size: 40),
+              child: Icon(Icons.cloud_off_rounded,
+                  color: AppColors.danger, size: 40),
             ),
             const SizedBox(height: 20),
             Text(
@@ -566,6 +571,22 @@ class _PlanViewState extends State<_PlanView> {
     await TrackingStorage.save(_sp.id, next);
   }
 
+  /// Logs an off-plan item against the day the user is looking at — so an extra
+  /// can be added to ANY day, not just today.
+  Future<void> _addExtra(int dayIndex) async {
+    final item = await showAddExtraSheet(context, dayIndex);
+    if (item == null || !mounted) return;
+    final next = _tracking.withExtra(item);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(_sp.id, next);
+  }
+
+  Future<void> _removeExtra(String id) async {
+    final next = _tracking.withoutExtra(id);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(_sp.id, next);
+  }
+
   /// Regenerates a single meal on the selected day (free on the backend), then
   /// replaces it in place and persists.
   Future<void> _swapMeal(int mealIndex) async {
@@ -587,6 +608,8 @@ class _PlanViewState extends State<_PlanView> {
       'avoidDish': meal.dish,
       if (req?['dietaryPreference'] != null)
         'dietaryPreference': req!['dietaryPreference'],
+      // A swap must honour allergies as strictly as the original plan did.
+      if (req?['allergies'] is List) 'allergies': req!['allergies'],
     };
 
     setState(() => _swapping = mealIndex);
@@ -777,7 +800,7 @@ class _PlanViewState extends State<_PlanView> {
                     ),
                     const SizedBox(height: 14),
                     AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 280),
+                      duration: motion(context, 280),
                       transitionBuilder: (child, anim) => FadeTransition(
                         opacity: anim,
                         child: SlideTransition(
@@ -816,6 +839,15 @@ class _PlanViewState extends State<_PlanView> {
                               ),
                             );
                           }),
+                          // ── anything off-plan eaten on this day
+                          ..._tracking.extrasFor(selected).map((e) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: ExtraRow(
+                                  item: e,
+                                  onRemove: () => _removeExtra(e.id),
+                                ),
+                              )),
+                          AddExtraButton(onTap: () => _addExtra(selected)),
                         ],
                       ),
                     ),
@@ -843,7 +875,9 @@ class _PlanViewState extends State<_PlanView> {
         if (days.isNotEmpty)
           Positioned(
             right: 16,
-            bottom: widget.embedded ? 96 : 18,
+            // Clear the gesture home indicator when not embedded (the hub dock
+            // already handles the safe area in the embedded case).
+            bottom: widget.embedded ? 96 : 18 + MediaQuery.of(context).padding.bottom,
             child: DecoratedBox(
               decoration: BoxDecoration(
                 gradient: AppColors.ctaGradient,
@@ -1140,8 +1174,8 @@ class _DateStripState extends State<_DateStrip> {
           return GestureDetector(
             onTap: () => widget.onSelect(i),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              width: 40,
+              duration: motion(context, 160),
+              width: 44,
               decoration: BoxDecoration(
                 color: sel ? AppColors.brand : Colors.transparent,
                 borderRadius: BorderRadius.circular(13),
@@ -1162,7 +1196,7 @@ class _DateStripState extends State<_DateStrip> {
                       letterSpacing: 0.6,
                       color: sel
                           ? Colors.white.withValues(alpha: 0.85)
-                          : AppColors.inkFaint,
+                          : AppColors.inkMuted,
                     ),
                   ),
                   const SizedBox(height: 3),
@@ -1269,7 +1303,6 @@ class _PlanMealRow extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final color = AppColors.forMeal(meal.name);
     final mint = MacroColors.protein;
-    final dark = AppColors.brightness == Brightness.dark;
 
     final macros = (meal.protein > 0 || meal.carbs > 0 || meal.fat > 0)
         ? ' · P${meal.protein} C${meal.carbs} F${meal.fat}'
@@ -1335,41 +1368,53 @@ class _PlanMealRow extends StatelessWidget {
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
                     onTap: (swapping || swapDisabled) ? null : onSwap,
+                    // 44dp tap area around the 30dp circle; a mis-tapped swap
+                    // costs a regeneration, so the target matters here.
                     child: SizedBox(
-                      width: 30,
-                      height: 30,
-                      child: swapping
-                          ? const Padding(
-                              padding: EdgeInsets.all(7),
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(Icons.autorenew_rounded,
-                              size: 16,
-                              color: swapDisabled
-                                  ? AppColors.inkFaint
-                                  : AppColors.brand),
+                      width: 44,
+                      height: 44,
+                      child: Center(
+                        child: SizedBox(
+                          width: 30,
+                          height: 30,
+                          child: swapping
+                              ? const Padding(
+                                  padding: EdgeInsets.all(7),
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : Icon(Icons.autorenew_rounded,
+                                  size: 16,
+                                  color: swapDisabled
+                                      ? AppColors.inkFaint
+                                      : AppColors.brand),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 6),
                 // check
                 GestureDetector(
                   onTap: onToggle,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: done ? mint : Colors.transparent,
-                      shape: BoxShape.circle,
-                      border:
-                          Border.all(color: done ? mint : AppColors.line, width: 2),
+                  behavior: HitTestBehavior.opaque, // 44dp hit area, 28dp visual
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Center(
+                      child: AnimatedContainer(
+                        duration: motion(context, 160),
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: done ? mint : Colors.transparent,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: done ? mint : AppColors.line, width: 2),
+                        ),
+                        child: Icon(Icons.check_rounded,
+                            size: 16,
+                            color: done ? AppColors.onMint : AppColors.inkFaint),
+                      ),
                     ),
-                    child: Icon(Icons.check_rounded,
-                        size: 16,
-                        color: done
-                            ? (dark ? const Color(0xFF062B1A) : Colors.white)
-                            : AppColors.inkFaint),
                   ),
                 ),
               ],
@@ -1421,7 +1466,7 @@ class _AboutPlanState extends State<_AboutPlan> {
                     const SizedBox(width: 7),
                     Text('ABOUT THIS PLAN',
                         style: text.labelSmall?.copyWith(
-                            color: AppColors.inkFaint,
+                            color: AppColors.inkMuted,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 1.2,
                             fontSize: 8.5)),

@@ -17,6 +17,7 @@ import {
   recordWeighIn,
   setWater,
   syncMealLog,
+  syncExtras,
   getTracking,
 } from './db.js';
 
@@ -93,6 +94,9 @@ plansRouter.put('/:id/tracking', async (req, res) => {
     for (const [day, glasses] of Object.entries(b.waterByDate)) {
       await setWater(req.user.id, id, String(day), Number(glasses) || 0);
     }
+  }
+  if (Array.isArray(b.extras)) {
+    await syncExtras(req.user.id, id, b.extras);
   }
   res.json({ ok: true });
 });

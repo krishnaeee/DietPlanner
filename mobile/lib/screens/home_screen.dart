@@ -126,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
           TextButton(
               onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE0573E)),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete'),
           ),
@@ -166,7 +166,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? Center(
+                    child: reduceMotion(context)
+                        ? Text('Loading…',
+                            style: TextStyle(color: AppColors.inkMuted))
+                        : const CircularProgressIndicator())
                 : _plans.isEmpty
                     ? _EmptyState(onAdd: _addPlan)
                     : ListView(
@@ -294,7 +298,7 @@ class _CreditChip extends StatelessWidget {
                 border: Border.all(color: AppColors.line),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -337,12 +341,7 @@ class _PlanCard extends StatelessWidget {
     required this.onDelete,
   });
 
-  static const _orbs = [
-    Color(0xFFFF4D6D), // coral
-    Color(0xFF8B7CFF), // violet
-    Color(0xFF4ADE9C), // mint
-    Color(0xFFFFB46B), // amber
-  ];
+  static const _orbs = AppColors.orbPalette;
 
   ({String label, Color color}) _goal() {
     final g = plan.request?['goal'];
@@ -368,7 +367,7 @@ class _PlanCard extends StatelessWidget {
       {Color? color}) {
     return PopupMenuItem<String>(
       value: value,
-      height: 42,
+      height: 48,
       child: Row(
         children: [
           Icon(icon, size: 17, color: color ?? AppColors.inkMuted),
@@ -521,9 +520,14 @@ class _PlanCard extends StatelessWidget {
                     const SizedBox(height: 10),
                     Row(
                       children: [
+                        if (loc.isNotEmpty) ...[
+                          Icon(Icons.place_rounded,
+                              size: 12, color: AppColors.inkMuted),
+                          const SizedBox(width: 3),
+                        ],
                         Expanded(
                           child: Text(
-                            loc.isEmpty ? '$total-day plan' : '📍 $loc',
+                            loc.isEmpty ? '$total-day plan' : loc,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: text.bodySmall?.copyWith(

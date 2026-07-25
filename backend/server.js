@@ -1,12 +1,18 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { generatePlan, generateMeal, MAX_PLAN_DAYS } from './planService.js';
+import {
+  generatePlan, generateMeal, generateRecipe, generateReview, generateActivity,
+  MAX_PLAN_DAYS,
+} from './planService.js';
 import { describeProvider } from './providers.js';
 import { authRouter, requireAuth } from './auth.js';
 import { billingRouter, stripeWebhookHandler } from './billingRoutes.js';
 import { plansRouter } from './plansRoutes.js';
-import { getEntitlements, spendCredits, addCredits, applyRetarget, pool } from './db.js';
+import {
+  getEntitlements, spendCredits, addCredits, applyRetarget,
+  getRecipe, saveRecipe, pool,
+} from './db.js';
 import { decideRetarget } from './retarget.js';
 import { BILLING_PROVIDER, CURRENCY } from './billing.js';
 
@@ -41,6 +47,7 @@ app.use('/api/plans', plansRouter);
 const SEXES = ['male', 'female', 'other'];
 const ACTIVITY = ['sedentary', 'light', 'moderate', 'active', 'very_active'];
 const GOALS = ['lose', 'gain', 'maintain']; // 'maintain' == "eat healthy"
+const COOKING_STYLES = ['everyday', 'less_oil', 'steamed', 'mixed'];
 
 // Validates and normalises the request body. Returns { value } or { error }.
 function validate(body) {
@@ -116,9 +123,36 @@ function validate(body) {
       errors.push(`activityLevel must be one of ${ACTIVITY.join(', ')}`);
     else value.activityLevel = body.activityLevel;
   }
+  // Cooking style — how meals are prepared. Optional; unknown is rejected like
+  // the other enums, and 'everyday' carries no special instruction.
+  if (body.cookingStyle) {
+    if (!COOKING_STYLES.includes(body.cookingStyle))
+      errors.push(`cookingStyle must be one of ${COOKING_STYLES.join(', ')}`);
+    else if (body.cookingStyle !== 'everyday') value.cookingStyle = body.cookingStyle;
+  }
   if (typeof body.dietaryPreference === 'string' && body.dietaryPreference.trim()) {
     value.dietaryPreference = body.dietaryPreference.trim();
   }
+
+  // Allergies — a medical constraint carried into every prompt (plan + swap).
+  // Accepts an array or a comma-separated string; deduped case-insensitively.
+  const rawAllergies = Array.isArray(body.allergies)
+    ? body.allergies
+    : typeof body.allergies === 'string'
+      ? body.allergies.split(',')
+      : [];
+  const seenAllergy = new Set();
+  const allergies = [];
+  for (const a of rawAllergies) {
+    const s = String(a ?? '').trim().slice(0, 40);
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seenAllergy.has(k)) continue;
+    seenAllergy.add(k);
+    allergies.push(s);
+    if (allergies.length >= 20) break; // keep the prompt bounded
+  }
+  if (allergies.length) value.allergies = allergies;
 
   // Continuation: which day of the journey this batch starts at, and dishes
   // from earlier weeks to avoid repeating.
@@ -285,6 +319,11 @@ app.post('/api/plan/meal', requireAuth, async (req, res) => {
     avoidDish: typeof body.avoidDish === 'string' ? body.avoidDish.trim() : '',
     dietaryPreference:
       typeof body.dietaryPreference === 'string' ? body.dietaryPreference.trim() : '',
+    // A swap must honour allergies just as strictly as the original plan.
+    allergies: (Array.isArray(body.allergies) ? body.allergies : [])
+      .map((a) => String(a ?? '').trim().slice(0, 40))
+      .filter(Boolean)
+      .slice(0, 20),
   };
   const tc = Math.round(num(body.targetCalories));
   if (tc > 0 && tc < 5000) input.targetCalories = tc;
@@ -297,6 +336,131 @@ app.post('/api/plan/meal', requireAuth, async (req, res) => {
     const status = err.status || 500;
     console.error(`[meal] → ${status}: ${err?.message}`);
     res.status(status).json({ error: err.message || 'Failed to swap meal.' });
+  }
+});
+
+// Step-by-step preparation for one dish. A GLOBAL cache means a dish is only
+// ever generated once for the whole app: a cache HIT is free; a MISS spends one
+// credit (free on an active subscription; refunded if generation fails), then
+// caches the result so it's free for everyone forever after.
+app.post('/api/recipe', requireAuth, async (req, res) => {
+  const body = req.body || {};
+  const dish = typeof body.dish === 'string' ? body.dish.trim() : '';
+  if (!dish) return res.status(400).json({ error: 'dish is required' });
+
+  // Cache hit → free, no credit, no LLM.
+  const cached = await getRecipe(dish);
+  if (cached) {
+    console.log(`[recipe] cache hit for "${dish}" (${req.user?.email})`);
+    return res.json({ recipe: cached, cached: true, charged: false });
+  }
+
+  // Cache miss → same gate as /api/plan: sub generates free, else spend 1 credit.
+  const ent = await getEntitlements(req.user.id);
+  let creditSpent = false;
+  if (!ent.subscriptionActive) {
+    const spend = await spendCredits(req.user.id, 1, { provider: 'app', productId: 'recipe' });
+    if (!spend.ok) {
+      return res.status(402).json({
+        error: "You're out of credits. Buy a credit pack or go unlimited to get preparation steps.",
+        code: 'PAYMENT_REQUIRED',
+        entitlements: { credits: spend.credits, subscriptionActive: false },
+      });
+    }
+    creditSpent = true;
+  }
+
+  try {
+    const recipe = await generateRecipe({
+      dish,
+      location: typeof body.location === 'string' ? body.location.trim() : '',
+      dietaryPreference:
+        typeof body.dietaryPreference === 'string' ? body.dietaryPreference.trim() : '',
+      allergies: (Array.isArray(body.allergies) ? body.allergies : [])
+        .map((a) => String(a ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 20),
+    });
+    await saveRecipe(dish, recipe, req.user.id);
+    const after = await getEntitlements(req.user.id);
+    console.log(`[recipe] generated + cached "${dish}" · charged=${creditSpent} · credits=${after.credits}`);
+    res.json({
+      recipe,
+      cached: false,
+      charged: creditSpent,
+      account: {
+        credits: after.credits,
+        subscriptionActive: after.subscriptionActive,
+        subscriptionExpiresAt: after.subscriptionActive ? after.subExpiresAt : null,
+      },
+    });
+  } catch (err) {
+    if (creditSpent) {
+      await addCredits(req.user.id, 1, {
+        kind: 'refund', provider: 'app', productId: 'recipe', amountCents: 0, currency: CURRENCY,
+      });
+      console.log(`[recipe] refunded 1 credit to ${req.user.email} after failure`);
+    }
+    const status = err.status || 500;
+    console.error(`[recipe] → ${status}: ${err?.message}`);
+    res.status(status).json({ error: err.message || 'Failed to get preparation steps.' });
+  }
+});
+
+// Progress review — the model interprets the user's own recorded figures
+// (weigh-ins, adherence, days elapsed) into a written assessment. FREE (auth
+// only), like a meal swap: it refines engagement with an already-paid plan and
+// we want people using it often. The client sends already-computed numbers.
+app.post('/api/review', requireAuth, async (req, res) => {
+  const b = req.body || {};
+  const num = (v) => (typeof v === 'number' && isFinite(v) ? v : Number(v) || 0);
+  const input = {
+    goal: ['lose', 'gain', 'maintain'].includes(b.goal) ? b.goal : 'maintain',
+    startWeightKg: num(b.startWeightKg),
+    targetWeightKg: num(b.targetWeightKg),
+    currentWeightKg: num(b.currentWeightKg),
+    targetDays: Math.max(1, Math.round(num(b.targetDays)) || 1),
+    daysElapsed: Math.max(0, Math.round(num(b.daysElapsed))),
+    calorieTarget: Math.round(num(b.calorieTarget)),
+    weighIns: (Array.isArray(b.weighIns) ? b.weighIns : [])
+      .filter((w) => w && w.date && isFinite(num(w.kg)))
+      .map((w) => ({ date: String(w.date), kg: num(w.kg) }))
+      .slice(0, 60),
+    mealsDone: Math.max(0, Math.round(num(b.mealsDone))),
+    mealsTotal: Math.max(0, Math.round(num(b.mealsTotal))),
+    extrasCount: Math.max(0, Math.round(num(b.extrasCount))),
+    extrasCalories: Math.max(0, Math.round(num(b.extrasCalories))),
+  };
+  try {
+    const review = await generateReview(input);
+    res.json({ review });
+  } catch (err) {
+    const status = err.status || 500;
+    console.error(`[review] → ${status}: ${err?.message}`);
+    res.status(status).json({ error: err.message || 'Failed to review your progress.' });
+  }
+});
+
+// Activity suggestions for a day or a week. FREE (auth only), like the review —
+// advice that supports an already-paid plan. NOT fed into the calorie math.
+app.post('/api/activity', requireAuth, async (req, res) => {
+  const b = req.body || {};
+  const num = (v) => (typeof v === 'number' && isFinite(v) ? v : Number(v) || 0);
+  const input = {
+    scope: b.scope === 'week' ? 'week' : 'day',
+    goal: ['lose', 'gain', 'maintain'].includes(b.goal) ? b.goal : 'maintain',
+    sex: SEXES.includes(b.sex) ? b.sex : undefined,
+    age: b.age != null && num(b.age) > 0 ? Math.round(num(b.age)) : undefined,
+    activityLevel: ACTIVITY.includes(b.activityLevel) ? b.activityLevel : undefined,
+    weightKg: num(b.weightKg) > 0 ? num(b.weightKg) : undefined,
+  };
+  try {
+    const activity = await generateActivity(input);
+    res.json({ activity });
+  } catch (err) {
+    const status = err.status || 500;
+    console.error(`[activity] → ${status}: ${err?.message}`);
+    res.status(status).json({ error: err.message || 'Failed to suggest activities.' });
   }
 });
 

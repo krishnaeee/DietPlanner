@@ -1,4 +1,14 @@
-import { buildPrompt, buildMealPrompt, MEAL_SCHEMA } from './planSchema.js';
+import {
+  buildPrompt,
+  buildMealPrompt,
+  buildRecipePrompt,
+  buildReviewPrompt,
+  buildActivityPrompt,
+  MEAL_SCHEMA,
+  RECIPE_SCHEMA,
+  REVIEW_SCHEMA,
+  ACTIVITY_SCHEMA,
+} from './planSchema.js';
 import { getProvider } from './providers.js';
 import { computeTargets } from './tdee.js';
 
@@ -27,6 +37,47 @@ function parsePlanJson(text) {
     }
     throw new Error('Model response was not valid JSON.');
   }
+}
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/// Safety net for allergies. buildPrompt states them as a hard constraint, but a
+/// model can still slip, so we keyword-scan the returned dishes, descriptions and
+/// ingredient names. These are FLAGS, not verdicts — a dairy allergy will also
+/// match "coconut milk" — so the client should surface them as "check these",
+/// letting the user (who knows their allergy) judge. For an allergy, a false
+/// positive is a far better failure mode than a silent miss.
+export function findAllergenFlags(plan, allergies) {
+  if (!allergies?.length || !plan?.days?.length) return [];
+  const terms = allergies.map((a) => ({
+    allergen: a,
+    re: new RegExp(`\\b${escapeRe(String(a).toLowerCase())}`, 'i'),
+  }));
+  const flags = [];
+  for (const day of plan.days) {
+    for (const meal of day.meals || []) {
+      const fields = [
+        meal.dish,
+        meal.description,
+        ...(meal.ingredients || []).map((i) => i?.name),
+      ].filter(Boolean);
+      for (const t of terms) {
+        const matched = fields.find((f) => t.re.test(String(f)));
+        if (matched) {
+          flags.push({
+            day: day.day,
+            meal: meal.name,
+            dish: meal.dish,
+            allergen: t.allergen,
+            matched: String(matched),
+          });
+        }
+      }
+    }
+  }
+  return flags;
 }
 
 export async function generatePlan(input) {
@@ -89,6 +140,15 @@ export async function generatePlan(input) {
   plan.dailyCarbsTarget = targets.macros.carbs;
   plan.dailyFatTarget = targets.macros.fat;
 
+  // Allergy safety net — keyword flags on what the model actually returned.
+  const allergyFlags = findAllergenFlags(plan, input.allergies);
+  if (allergyFlags.length) {
+    console.warn(
+      `[gen] ⚠ allergen keyword hits: ` +
+        allergyFlags.map((f) => `${f.allergen} in "${f.dish}" (day ${f.day})`).join('; '),
+    );
+  }
+
   return {
     plan,
     meta: {
@@ -106,6 +166,8 @@ export async function generatePlan(input) {
       calorieTarget: targets.calorieTarget,
       rateKgPerWeek: targets.rateKgPerWeek,
       targetWarnings: targets.warnings,
+      // Possible allergen mentions to surface as "check these" (not verdicts).
+      allergyFlags,
     },
   };
 }
@@ -125,4 +187,51 @@ export async function generateMeal(input) {
   });
   const meal = parsePlanJson(result.text);
   return { meal, meta: { provider: provider.name, model: provider.model } };
+}
+
+// Generates step-by-step preparation instructions for one dish. Small, fast
+// call; the caller caches the result so a dish is only ever generated once.
+export async function generateRecipe(input) {
+  const { system, user } = buildRecipePrompt(input);
+  const provider = getProvider();
+  console.log(`[recipe] generating steps for "${input.dish}"…`);
+  const result = await provider.generate({
+    system,
+    user,
+    maxTokens: 2000,
+    effort: 'low',
+    schema: RECIPE_SCHEMA,
+  });
+  return parsePlanJson(result.text);
+}
+
+// Writes a progress review from already-computed figures (weigh-ins, adherence,
+// days elapsed). Small, fast call. The caller decides whether it's free.
+export async function generateReview(input) {
+  const { system, user } = buildReviewPrompt(input);
+  const provider = getProvider();
+  console.log(`[review] reviewing progress (day ${input.daysElapsed}/${input.targetDays})…`);
+  const result = await provider.generate({
+    system,
+    user,
+    maxTokens: 1500,
+    effort: 'low',
+    schema: REVIEW_SCHEMA,
+  });
+  return parsePlanJson(result.text);
+}
+
+// Suggests activities for a day or a week, tailored to goal/stats. Small call.
+export async function generateActivity(input) {
+  const { system, user } = buildActivityPrompt(input);
+  const provider = getProvider();
+  console.log(`[activity] suggesting ${input.scope === 'week' ? 'a week' : 'a day'} of activity…`);
+  const result = await provider.generate({
+    system,
+    user,
+    maxTokens: 2000,
+    effort: 'low',
+    schema: ACTIVITY_SCHEMA,
+  });
+  return parsePlanJson(result.text);
 }

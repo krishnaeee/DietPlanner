@@ -6,6 +6,7 @@ import '../services/auth_service.dart';
 import '../services/plan_storage.dart';
 import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
+import '../widgets/add_extra_sheet.dart';
 import '../widgets/fresh.dart';
 import 'diet_settings_screen.dart';
 import 'grocery_list_screen.dart';
@@ -81,6 +82,21 @@ class _TodayScreenState extends State<TodayScreen> {
     await TrackingStorage.save(_plan.id, next);
   }
 
+  /// Logs an off-plan item (snack, tea, coffee) against [dayIndex].
+  Future<void> _addExtra(int dayIndex) async {
+    final item = await showAddExtraSheet(context, dayIndex);
+    if (item == null || !mounted) return;
+    final next = _tracking.withExtra(item);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(_plan.id, next);
+  }
+
+  Future<void> _removeExtra(String id) async {
+    final next = _tracking.withoutExtra(id);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(_plan.id, next);
+  }
+
   void _openDietSettings() => Navigator.of(context)
       .push(MaterialPageRoute(builder: (_) => DietSettingsScreen(stored: _plan)));
 
@@ -123,6 +139,15 @@ class _TodayScreenState extends State<TodayScreen> {
         f += day.meals[m].fat;
         doneCount++;
       }
+    }
+    // Off-plan items count toward the day too — that's the whole point of
+    // logging them, otherwise the ring keeps flattering you.
+    final extras = _tracking.extrasFor(ds.index);
+    for (final e in extras) {
+      kcal += e.calories;
+      p += e.protein;
+      c += e.carbs;
+      f += e.fat;
     }
     // The next unchecked meal — promoted as "Up next".
     var next = -1;
@@ -236,6 +261,21 @@ class _TodayScreenState extends State<TodayScreen> {
                 );
               }),
 
+              // ── anything off-plan eaten today
+              const SizedBox(height: 6),
+              if (extras.isNotEmpty) ...[
+                _Micro('ALSO EATEN · ${_tracking.extraCaloriesFor(ds.index)} KCAL'),
+                const SizedBox(height: 8),
+                ...extras.map((e) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: ExtraRow(
+                        item: e,
+                        onRemove: () => _removeExtra(e.id),
+                      ),
+                    )),
+              ],
+              AddExtraButton(onTap: () => _addExtra(ds.index)),
+
               const SizedBox(height: 4),
               _GroceryShortcut(
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
@@ -273,7 +313,7 @@ class _Micro extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: AppColors.inkFaint,
+            color: AppColors.inkMuted,
             fontWeight: FontWeight.w800,
             letterSpacing: 1.4,
             fontSize: 9));
@@ -345,14 +385,20 @@ class _UpNextCard extends StatelessWidget {
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
                     onTap: onEat,
-                    child: Padding(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text('Mark eaten',
-                          style: TextStyle(
-                              color: AppColors.bg,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 10.5)),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 44),
+                      child: Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        child: Center(
+                          widthFactor: 1,
+                          child: Text('Mark eaten',
+                              style: TextStyle(
+                                  color: AppColors.bg,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 10.5)),
+                        ),
+                      ),
                     ),
                   ),
                 ),

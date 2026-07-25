@@ -10,6 +10,29 @@ import 'plan_screen.dart';
 /// The plan-creation flow — a step-by-step wizard (Goal → Body → Where → About).
 /// On the last step it generates and replaces itself with the [PlanScreen], so
 /// backing out of the plan returns to where the wizard was opened from.
+/// Merges the allergy chip picks with the free-text field: trimmed, blanks
+/// dropped, de-duped case-insensitively (so "Milk" typed after tapping the Milk
+/// chip doesn't send it twice). Top-level and testable because it assembles a
+/// safety constraint — the backend refuses to include anything in this list.
+@visibleForTesting
+List<String> mergeAllergies(Iterable<String> picks, String freeText) {
+  final out = <String>[];
+  final seen = <String>{};
+  void add(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return;
+    if (seen.add(t.toLowerCase())) out.add(t);
+  }
+
+  for (final a in picks) {
+    add(a);
+  }
+  for (final a in freeText.split(',')) {
+    add(a);
+  }
+  return out;
+}
+
 class AddPlanScreen extends StatefulWidget {
   const AddPlanScreen({super.key});
 
@@ -32,11 +55,17 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
   final _period = TextEditingController(text: '24');
   final _age = TextEditingController(text: '36');
   final _dietPref = TextEditingController();
+  final _allergies = TextEditingController();
   final _planName = TextEditingController();
+
+  /// Allergies picked from the common-allergen chips (multi-select — unlike the
+  /// single-choice diet preference, people are often allergic to several things).
+  final _allergyPicks = <String>{};
 
   String _periodUnit = 'weeks'; // 'weeks' | 'days'
   String _sex = 'male'; // male | female | other
   String _activity = 'light'; // sedentary ... very_active
+  String _cookingStyle = 'everyday'; // everyday | less_oil | steamed | mixed
   String _goal = 'lose'; // lose | gain | maintain ("eat healthy")
 
   bool get _maintain => _goal == 'maintain';
@@ -68,6 +97,7 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     _period.dispose();
     _age.dispose();
     _dietPref.dispose();
+    _allergies.dispose();
     _planName.dispose();
     super.dispose();
   }
@@ -129,7 +159,7 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
       color = AppColors.accent;
     } else {
       category = 'Obese';
-      color = const Color(0xFFE0573E);
+      color = AppColors.danger;
     }
     return (bmi: bmi, category: category, color: color, lo: 18.5 * m * m, hi: 24.9 * m * m);
   }
@@ -167,6 +197,9 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
     return null;
   }
 
+  /// Chip picks + the free-text field, trimmed and de-duped case-insensitively.
+  List<String> get _allergyList => mergeAllergies(_allergyPicks, _allergies.text);
+
   void _submit() {
     FocusScope.of(context).unfocus();
     // Each step was validated as the user advanced (its form was mounted then),
@@ -190,7 +223,9 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
       if (_age.text.trim().isNotEmpty) 'age': int.tryParse(_age.text.trim()),
       'sex': _sex,
       'activityLevel': _activity,
+      'cookingStyle': _cookingStyle,
       if (_dietPref.text.trim().isNotEmpty) 'dietaryPreference': _dietPref.text.trim(),
+      if (_allergyList.isNotEmpty) 'allergies': _allergyList,
     };
 
     Navigator.of(context).pushReplacement(
@@ -478,6 +513,33 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
               .toList(),
         ),
         const SizedBox(height: 18),
+        const FieldLabel('Cooking style'),
+        const SizedBox(height: 2),
+        Text(
+          'How your meals are cooked — the plan is built around this.',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: AppColors.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: const [
+            (value: 'everyday', label: 'Everyday home food'),
+            (value: 'less_oil', label: 'Light · less oil'),
+            (value: 'steamed', label: 'Steamed / boiled'),
+            (value: 'mixed', label: 'A healthy mix'),
+          ]
+              .map((o) => _ChoicePill(
+                    label: o.label,
+                    selected: _cookingStyle == o.value,
+                    onTap: () => setState(() => _cookingStyle = o.value),
+                  ))
+              .toList(),
+        ),
+        const SizedBox(height: 18),
         _LabeledField(
           label: 'Dietary preference',
           controller: _dietPref,
@@ -496,6 +558,40 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
                     onTap: () => setState(() {
                       _dietPref.text =
                           _dietPref.text.toLowerCase() == d.toLowerCase() ? '' : d;
+                    }),
+                  ))
+              .toList(),
+        ),
+        const SizedBox(height: 20),
+        _LabeledField(
+          label: 'Food allergies',
+          controller: _allergies,
+          hint: 'e.g. prawns, cashew — separate with commas',
+          icon: Icons.warning_amber_rounded,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Anything you list here is never included in your plan, or in a meal you swap.',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: AppColors.inkMuted, height: 1.4),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: const [
+            'Peanuts', 'Tree nuts', 'Milk', 'Eggs', 'Fish',
+            'Shellfish', 'Soy', 'Wheat / gluten', 'Sesame',
+          ]
+              .map((a) => _ChoicePill(
+                    label: a,
+                    dense: true,
+                    selected: _allergyPicks.contains(a),
+                    // Multi-select: remove() returns false when it wasn't there.
+                    onTap: () => setState(() {
+                      if (!_allergyPicks.remove(a)) _allergyPicks.add(a);
                     }),
                   ))
               .toList(),
@@ -650,8 +746,8 @@ class _CircleBack extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          width: 40,
-          height: 40,
+          width: 48,
+          height: 48,
           child: Icon(Icons.arrow_back_rounded, size: 20, color: AppColors.ink),
         ),
       ),
@@ -671,7 +767,7 @@ class _StepProgress extends StatelessWidget {
           if (i > 0) const SizedBox(width: 6),
           Expanded(
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
+              duration: motion(context, 220),
               height: 6,
               decoration: BoxDecoration(
                 color: i <= step ? AppColors.brand : AppColors.line,
@@ -773,7 +869,7 @@ class _PillToggle<T> extends StatelessWidget {
             child: GestureDetector(
               onTap: () => onChanged(o.value),
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
+                duration: motion(context, 180),
                 curve: Curves.easeOut,
                 decoration: BoxDecoration(
                   color: sel ? AppColors.brand : Colors.transparent,
@@ -837,7 +933,7 @@ class _ChoicePill extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+        duration: motion(context, 160),
         padding: EdgeInsets.symmetric(horizontal: dense ? 14 : 16, vertical: dense ? 8 : 10),
         decoration: BoxDecoration(
           color: selected ? AppColors.brand : AppColors.fieldFill,

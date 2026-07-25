@@ -112,7 +112,7 @@ class AuthHero extends StatelessWidget {
                 gradient: const RadialGradient(
                   center: Alignment(-0.45, -0.55),
                   radius: 1.35,
-                  colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
+                  colors: AppColors.orbColors,
                 ),
               ),
               child: Stack(
@@ -199,8 +199,13 @@ class AuthBusyBox extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const SizedBox(
-              width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(
+              width: 17,
+              height: 17,
+              child: reduceMotion(context)
+                  ? Icon(Icons.hourglass_empty_rounded,
+                      size: 15, color: AppColors.inkMuted)
+                  : const CircularProgressIndicator(strokeWidth: 2)),
           const SizedBox(width: 10),
           Text(label,
               style: Theme.of(context).textTheme.titleSmall?.copyWith(

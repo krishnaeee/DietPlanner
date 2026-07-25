@@ -117,8 +117,8 @@ class SettingsScreen extends StatelessWidget {
                         onPressed: () => _logout(context),
                         icon: const Icon(Icons.logout_rounded, size: 18),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFE0573E),
-                          side: const BorderSide(color: Color(0xFFE0573E)),
+                          foregroundColor: AppColors.danger,
+                          side: BorderSide(color: AppColors.danger),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(AppRadius.field)),

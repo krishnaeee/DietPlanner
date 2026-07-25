@@ -142,6 +142,26 @@ await pool.query(`
   );
 `);
 
+// Off-plan items the user logged (a snack, tea, coffee) — what they ate that
+// the plan didn't contain. Separate from meal_log, which tracks adherence to
+// PLANNED meals; these are additions, so they have no meal_index.
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS extra_food (
+    id         TEXT NOT NULL,                                                -- client-generated, unique per plan
+    plan_id    TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day_index  INTEGER NOT NULL,                                             -- 0-based plan day
+    name       TEXT NOT NULL,
+    calories   INTEGER NOT NULL DEFAULT 0,
+    protein    INTEGER NOT NULL DEFAULT 0,
+    carbs      INTEGER NOT NULL DEFAULT 0,
+    fat        INTEGER NOT NULL DEFAULT 0,
+    logged_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (plan_id, id)
+  );
+`);
+await pool.query('CREATE INDEX IF NOT EXISTS idx_extra_food_plan ON extra_food(plan_id, day_index)');
+
 // Audit ledger of every adaptive re-target decision — same philosophy as
 // `transactions`: makes the coach's course-corrections explainable.
 await pool.query(`
@@ -159,6 +179,20 @@ await pool.query(`
   );
 `);
 await pool.query('CREATE INDEX IF NOT EXISTS idx_retarget_plan ON retarget_events(plan_id)');
+
+// Preparation-step cache, keyed by a normalised dish name and GLOBAL across all
+// users: the first person to ask about a dish pays one credit to generate it,
+// and everyone else (including the same user on a later day / another plan) gets
+// it free. That's what makes "generate once, reuse forever" cheap.
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS recipes (
+    dish_key   TEXT PRIMARY KEY,                 -- lowercased, whitespace-collapsed dish name
+    dish       TEXT NOT NULL,                    -- first-seen display name
+    recipe     JSONB NOT NULL,                   -- {dish, servings, prepMinutes, steps[], tips[]}
+    created_by INTEGER,                          -- who first generated it (informational)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+`);
 
 // ─────────────────────────────────────────────────────────────── users ──
 
@@ -470,6 +504,39 @@ export async function syncMealLog(userId, planId, meals) {
   });
 }
 
+/// Replaces a plan's off-plan food log with [extras] (each {id, dayIndex, name,
+/// calories, protein?, carbs?, fat?}). Delete-then-insert in one transaction —
+/// same snapshot model as syncMealLog, so a partial sync can't tear the state.
+/// A foreign plan makes the whole thing a no-op.
+export async function syncExtras(userId, planId, extras) {
+  return inTx(async (client) => {
+    const owned = await client.query(
+      'SELECT 1 FROM plans WHERE id = $1 AND user_id = $2',
+      [planId, userId],
+    );
+    if (!owned.rowCount) return false;
+    await client.query('DELETE FROM extra_food WHERE plan_id = $1', [planId]);
+    for (const e of extras) {
+      if (!e?.id || e.dayIndex == null) continue;
+      await client.query(
+        `INSERT INTO extra_food
+           (id, plan_id, user_id, day_index, name, calories, protein, carbs, fat)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (plan_id, id) DO NOTHING`,
+        [
+          String(e.id), planId, userId, Math.round(Number(e.dayIndex) || 0),
+          String(e.name ?? '').slice(0, 120),
+          Math.round(Number(e.calories) || 0),
+          Math.round(Number(e.protein) || 0),
+          Math.round(Number(e.carbs) || 0),
+          Math.round(Number(e.fat) || 0),
+        ],
+      );
+    }
+    return true;
+  });
+}
+
 /// Sets the glass count for a calendar day (clamped at 0). Ownership-guarded like
 /// recordWeighIn. [day] is a yyyy-mm-dd string.
 export async function setWater(userId, planId, day, glasses) {
@@ -553,6 +620,10 @@ export async function getTracking(userId, planId) {
     "SELECT to_char(day,'YYYY-MM-DD') AS d, glasses FROM water_log WHERE plan_id = $1",
     [planId],
   );
+  const { rows: ex } = await pool.query(
+    'SELECT id, day_index, name, calories, protein, carbs, fat FROM extra_food WHERE plan_id = $1 ORDER BY logged_at',
+    [planId],
+  );
   const waterByDate = {};
   for (const r of wa) waterByDate[r.d] = r.glasses;
   return {
@@ -561,7 +632,45 @@ export async function getTracking(userId, planId) {
     waterByDate,
     waterGoal: prow[0].water_goal,
     waterRemindersOn: prow[0].water_reminders_on,
+    extras: ex.map((r) => ({
+      id: r.id,
+      dayIndex: r.day_index,
+      name: r.name,
+      calories: r.calories,
+      protein: r.protein,
+      carbs: r.carbs,
+      fat: r.fat,
+    })),
   };
+}
+
+// ─────────────────────────────────────────────────────────── recipes ──
+
+/// Normalises a dish name to its cache key, so "Idli", "idli " and "IDLI" all
+/// hit the same cached recipe. Exported so callers/tests share the exact rule.
+export function recipeKey(dish) {
+  return String(dish ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/// The cached recipe object for [dish], or undefined on a miss.
+export async function getRecipe(dish) {
+  const key = recipeKey(dish);
+  if (!key) return undefined;
+  const { rows } = await pool.query('SELECT recipe FROM recipes WHERE dish_key = $1', [key]);
+  return rows[0]?.recipe;
+}
+
+/// Caches a generated recipe. First writer wins (ON CONFLICT DO NOTHING) so a
+/// race between two users generating the same dish can't error or double-store.
+export async function saveRecipe(dish, recipe, userId) {
+  const key = recipeKey(dish);
+  if (!key) return;
+  await pool.query(
+    `INSERT INTO recipes (dish_key, dish, recipe, created_by)
+       VALUES ($1, $2, $3, $4)
+     ON CONFLICT (dish_key) DO NOTHING`,
+    [key, String(dish), JSON.stringify(recipe), userId ?? null],
+  );
 }
 
 export default pool;

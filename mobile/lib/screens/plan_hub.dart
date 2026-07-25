@@ -65,9 +65,7 @@ class _Dock extends StatelessWidget {
           margin: const EdgeInsets.only(top: 6),
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            color: dark
-                ? const Color(0xFF14171F).withValues(alpha: 0.94)
-                : Colors.white.withValues(alpha: 0.96),
+            color: AppColors.surface.withValues(alpha: dark ? 0.94 : 0.96),
             borderRadius: BorderRadius.circular(99),
             border: Border.all(color: AppColors.line),
             boxShadow: [
@@ -111,7 +109,7 @@ class _DockItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppColors.ink : AppColors.inkFaint;
+    final color = selected ? AppColors.ink : AppColors.inkMuted;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(99),
@@ -132,7 +130,7 @@ class _DockItem extends StatelessWidget {
               const SizedBox(height: 2),
               // Coral dot marks the active tab.
               AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
+                duration: motion(context, 180),
                 width: selected ? 4 : 0,
                 height: 4,
                 decoration: const BoxDecoration(

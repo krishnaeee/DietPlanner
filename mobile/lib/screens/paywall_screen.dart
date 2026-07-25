@@ -427,7 +427,7 @@ class _ProductCard extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             SizedBox(
-              height: 40,
+              height: 48,
               child: FilledButton(
                 onPressed: disabled ? null : onBuy,
                 style: FilledButton.styleFrom(
@@ -466,7 +466,7 @@ class _SectionLabel extends StatelessWidget {
       child: Text(
         text.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: AppColors.inkFaint,
+              color: AppColors.inkMuted,
               fontWeight: FontWeight.w800,
               letterSpacing: 1.4,
               fontSize: 9,

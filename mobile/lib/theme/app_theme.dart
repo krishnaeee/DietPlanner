@@ -27,6 +27,23 @@ class AppColors {
   /// Secondary accent — violet (targets, fat macro).
   static const violet = Color(0xFF8B7CFF);
 
+  /// Error / destructive (delete, out-of-range, error states).
+  static const danger = Color(0xFFE0573E);
+
+  /// The warm coral orb gradient (auth mark, meal orb, plan loader disc).
+  static const orbColors = [Color(0xFFFFB46B), Color(0xFFFF5D6D)];
+
+  /// Decorative cover-card orb tints, cycled by plan slot.
+  static const orbPalette = [
+    Color(0xFFFF4D6D), // coral
+    Color(0xFF8B7CFF), // violet
+    Color(0xFF4ADE9C), // mint
+    Color(0xFFFFB46B), // amber
+  ];
+
+  /// Legible foreground for the mint check fill (deep green on dark, white on light).
+  static Color get onMint => _dark ? const Color(0xFF062B1A) : Colors.white;
+
   // Meal-type accents (medium strength: legible on both grounds).
   static const breakfast = Color(0xFFF2A040);
   static const lunch = Color(0xFF2BB673);
@@ -121,6 +138,17 @@ List<BoxShadow> coralGlow({double opacity = 0.16, double blur = 10, double y = 3
     ),
   ];
 }
+
+/// An animation duration that collapses to zero when the OS "reduce motion"
+/// accessibility setting is on — so implicit animations (AnimatedContainer,
+/// AnimatedSwitcher) and repeating loops honour it. Use in place of a literal
+/// `Duration(milliseconds: ms)` on animated widgets.
+Duration motion(BuildContext context, int ms) =>
+    MediaQuery.of(context).disableAnimations ? Duration.zero : Duration(milliseconds: ms);
+
+/// Whether the OS "reduce motion" setting is on — gate continuous/looping
+/// animations (e.g. a spinner) on this.
+bool reduceMotion(BuildContext context) => MediaQuery.of(context).disableAnimations;
 
 class AppTheme {
   AppTheme._();

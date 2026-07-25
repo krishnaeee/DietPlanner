@@ -41,7 +41,7 @@ class SectionCard extends StatelessWidget {
                   Text(
                     title!.toUpperCase(),
                     style: text.labelSmall?.copyWith(
-                      color: AppColors.inkFaint,
+                      color: AppColors.inkMuted,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 1.2,
                       fontSize: 8.5,

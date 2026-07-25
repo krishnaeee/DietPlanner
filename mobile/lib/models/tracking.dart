@@ -35,6 +35,52 @@ class WeighIn {
       );
 }
 
+/// Something the user ate that the plan didn't include — a snack, a tea, a
+/// coffee. Without this the app can only see adherence to the planned menu, so
+/// a day of perfect check-offs plus four teas still looked "on target".
+///
+/// Calories are the user's own figure (a quick-pick preset or typed in), so
+/// logging one costs nothing and works offline.
+class ExtraItem {
+  final String id; // stable, so it can be removed and synced
+  final int dayIndex; // 0-based plan day it was eaten on
+  final String name;
+  final int calories;
+  final int protein;
+  final int carbs;
+  final int fat;
+
+  ExtraItem({
+    required this.id,
+    required this.dayIndex,
+    required this.name,
+    required this.calories,
+    this.protein = 0,
+    this.carbs = 0,
+    this.fat = 0,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'dayIndex': dayIndex,
+        'name': name,
+        'calories': calories,
+        'protein': protein,
+        'carbs': carbs,
+        'fat': fat,
+      };
+
+  static ExtraItem fromJson(Map<String, dynamic> j) => ExtraItem(
+        id: (j['id'] ?? '').toString(),
+        dayIndex: _toInt(j['dayIndex']),
+        name: (j['name'] ?? '').toString(),
+        calories: _toInt(j['calories']),
+        protein: _toInt(j['protein']),
+        carbs: _toInt(j['carbs']),
+        fat: _toInt(j['fat']),
+      );
+}
+
 /// All tracking state for one plan.
 class PlanTracking {
   /// Weigh-ins, kept sorted oldest → newest.
@@ -52,12 +98,16 @@ class PlanTracking {
   /// Whether daily hydration reminders are scheduled for this plan.
   final bool waterRemindersOn;
 
+  /// Off-plan items eaten, across all days (see [ExtraItem]).
+  final List<ExtraItem> extras;
+
   PlanTracking({
     this.weighIns = const [],
     this.mealsDone = const {},
     this.waterByDate = const {},
     this.waterGoal = 8,
     this.waterRemindersOn = false,
+    this.extras = const [],
   });
 
   PlanTracking copyWith({
@@ -66,6 +116,7 @@ class PlanTracking {
     Map<String, int>? waterByDate,
     int? waterGoal,
     bool? waterRemindersOn,
+    List<ExtraItem>? extras,
   }) =>
       PlanTracking(
         weighIns: weighIns ?? this.weighIns,
@@ -73,6 +124,7 @@ class PlanTracking {
         waterByDate: waterByDate ?? this.waterByDate,
         waterGoal: waterGoal ?? this.waterGoal,
         waterRemindersOn: waterRemindersOn ?? this.waterRemindersOn,
+        extras: extras ?? this.extras,
       );
 
   // ───────────────────────────────────────────────────────── reads ──
@@ -80,6 +132,15 @@ class PlanTracking {
   bool isMealDone(int day, int meal) => mealsDone.contains('$day:$meal');
 
   int waterFor(DateTime d) => waterByDate[dateKey(d)] ?? 0;
+
+  /// Off-plan items logged on a plan day, in the order they were added.
+  List<ExtraItem> extrasFor(int dayIndex) =>
+      extras.where((e) => e.dayIndex == dayIndex).toList();
+
+  /// Calories from off-plan items on a plan day — added on top of the planned
+  /// meals so a day's total reflects what was actually eaten.
+  int extraCaloriesFor(int dayIndex) =>
+      extrasFor(dayIndex).fold(0, (s, e) => s + e.calories);
 
   double? get firstWeight => weighIns.isEmpty ? null : weighIns.first.kg;
   double? get latestWeight => weighIns.isEmpty ? null : weighIns.last.kg;
@@ -113,6 +174,13 @@ class PlanTracking {
     return copyWith(weighIns: list);
   }
 
+  /// Adds an off-plan item.
+  PlanTracking withExtra(ExtraItem e) => copyWith(extras: [...extras, e]);
+
+  /// Removes an off-plan item by id.
+  PlanTracking withoutExtra(String id) =>
+      copyWith(extras: extras.where((e) => e.id != id).toList());
+
   /// Sets the glass count for [date]'s calendar day (clamped at 0).
   PlanTracking withWater(DateTime date, int glasses) {
     final next = Map<String, int>.from(waterByDate);
@@ -137,6 +205,12 @@ class PlanTracking {
       final day = int.tryParse(k.split(':').first);
       if (day == null) continue;
       final d = DateTime(startDate.year, startDate.month, startDate.day + day);
+      days.add(dateKey(d));
+    }
+    // Logging an off-plan item is engagement too — it keeps a streak alive.
+    for (final e in extras) {
+      final d =
+          DateTime(startDate.year, startDate.month, startDate.day + e.dayIndex);
       days.add(dateKey(d));
     }
     return days;
@@ -181,6 +255,7 @@ class PlanTracking {
         'waterByDate': waterByDate,
         'waterGoal': waterGoal,
         'waterRemindersOn': waterRemindersOn,
+        'extras': extras.map((e) => e.toJson()).toList(),
       };
 
   static PlanTracking fromJson(Map<String, dynamic> m) {
@@ -199,6 +274,9 @@ class PlanTracking {
       waterByDate: water,
       waterGoal: m['waterGoal'] == null ? 8 : _toInt(m['waterGoal']),
       waterRemindersOn: m['waterRemindersOn'] == true,
+      extras: ((m['extras'] as List?) ?? [])
+          .map((e) => ExtraItem.fromJson((e as Map).cast<String, dynamic>()))
+          .toList(),
     );
   }
 }

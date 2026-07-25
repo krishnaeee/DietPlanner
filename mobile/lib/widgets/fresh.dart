@@ -87,7 +87,7 @@ class HeaderCircleButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-            width: 38, height: 38, child: Icon(icon, size: 18, color: AppColors.ink)),
+            width: 44, height: 44, child: Icon(icon, size: 18, color: AppColors.ink)),
       ),
     );
     return tooltip == null ? btn : Tooltip(message: tooltip!, child: btn);
@@ -115,7 +115,7 @@ class HeaderPill extends StatelessWidget {
             border: Border.all(color: AppColors.line),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -442,27 +442,33 @@ class _Check extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppColors.brightness == Brightness.dark;
     return Semantics(
       button: true,
       checked: done,
       label: done ? 'Eaten' : 'Mark eaten',
       child: GestureDetector(
         onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: done ? mint : Colors.transparent,
-            shape: BoxShape.circle,
-            border: Border.all(color: done ? mint : AppColors.line, width: 2),
+        // Expand the tap area to 44dp around the 28dp visual (hitSlop) so a
+        // primary tracking action isn't a fiddly target.
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Center(
+            child: AnimatedContainer(
+              duration: motion(context, 160),
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: done ? mint : Colors.transparent,
+                shape: BoxShape.circle,
+                border: Border.all(color: done ? mint : AppColors.line, width: 2),
+              ),
+              child: Icon(Icons.check_rounded,
+                  size: 16,
+                  color: done ? AppColors.onMint : AppColors.inkFaint),
+            ),
           ),
-          child: Icon(Icons.check_rounded,
-              size: 16,
-              color: done
-                  ? (dark ? const Color(0xFF062B1A) : Colors.white)
-                  : AppColors.inkFaint),
         ),
       ),
     );

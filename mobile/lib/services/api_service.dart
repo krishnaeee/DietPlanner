@@ -3,7 +3,10 @@ import 'package:http/http.dart' as http;
 
 import '../config.dart';
 import '../models/billing.dart';
+import '../models/activity.dart';
 import '../models/diet_plan.dart';
+import '../models/recipe.dart';
+import '../models/review.dart';
 import 'auth_service.dart';
 import 'billing_service.dart';
 
@@ -132,6 +135,150 @@ class ApiService {
       message = e?.toString() ?? 'Could not swap the meal.';
     } catch (_) {
       message = 'Could not swap the meal (HTTP ${resp.statusCode}).';
+    }
+    throw ApiException(message);
+  }
+
+  /// Fetches step-by-step preparation for a dish. A server-side cache HIT is
+  /// free; a MISS costs one credit (or is free on an active subscription) and is
+  /// then cached for everyone. Throws [PaymentRequiredException] on 402.
+  static Future<Recipe> getRecipe(Map<String, dynamic> body) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/recipe');
+    final token = AuthService.instance.token;
+    http.Response resp;
+    try {
+      resp = await http
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 90));
+    } catch (e) {
+      throw ApiException('Could not reach the server. ($e)');
+    }
+
+    if (resp.statusCode == 200) {
+      final b = jsonDecode(resp.body) as Map<String, dynamic>;
+      // A cache-miss response carries the post-charge balance — keep it in sync.
+      if (b['account'] is Map) {
+        BillingService.instance
+            .applyEntitlements(Entitlements.fromJson(b['account'] as Map<String, dynamic>));
+      }
+      final r = b['recipe'];
+      if (r is Map<String, dynamic>) return Recipe.fromJson(r);
+      throw ApiException('The server returned no recipe.');
+    }
+    if (resp.statusCode == 401) {
+      await AuthService.instance.logout();
+      throw ApiException('Your session expired. Please log in again.');
+    }
+    if (resp.statusCode == 402) {
+      Entitlements ent = const Entitlements();
+      String message = "You're out of credits.";
+      try {
+        final err = jsonDecode(resp.body) as Map<String, dynamic>;
+        message = err['error']?.toString() ?? message;
+        if (err['entitlements'] is Map) {
+          ent = Entitlements.fromJson(err['entitlements'] as Map<String, dynamic>);
+        }
+      } catch (_) {}
+      BillingService.instance.applyEntitlements(ent);
+      throw PaymentRequiredException(message, ent);
+    }
+    String message;
+    try {
+      final err = jsonDecode(resp.body);
+      final e = err is Map ? err['error'] : null;
+      message = e?.toString() ?? 'Could not get preparation steps.';
+    } catch (_) {
+      message = 'Could not get preparation steps (HTTP ${resp.statusCode}).';
+    }
+    throw ApiException(message);
+  }
+
+  /// Asks the model to review progress from the user's own recorded figures.
+  /// Free (auth only). [body] carries the already-computed summary numbers.
+  static Future<Review> getReview(Map<String, dynamic> body) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/review');
+    final token = AuthService.instance.token;
+    http.Response resp;
+    try {
+      resp = await http
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 90));
+    } catch (e) {
+      throw ApiException('Could not reach the server. ($e)');
+    }
+
+    if (resp.statusCode == 200) {
+      final b = jsonDecode(resp.body) as Map<String, dynamic>;
+      final r = b['review'];
+      if (r is Map<String, dynamic>) return Review.fromJson(r);
+      throw ApiException('The server returned no review.');
+    }
+    if (resp.statusCode == 401) {
+      await AuthService.instance.logout();
+      throw ApiException('Your session expired. Please log in again.');
+    }
+    String message;
+    try {
+      final err = jsonDecode(resp.body);
+      final e = err is Map ? err['error'] : null;
+      message = e?.toString() ?? 'Could not review your progress.';
+    } catch (_) {
+      message = 'Could not review your progress (HTTP ${resp.statusCode}).';
+    }
+    throw ApiException(message);
+  }
+
+  /// Suggests activities for a day or a week. Free (auth only).
+  static Future<ActivityPlan> getActivity(Map<String, dynamic> body) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/activity');
+    final token = AuthService.instance.token;
+    http.Response resp;
+    try {
+      resp = await http
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 90));
+    } catch (e) {
+      throw ApiException('Could not reach the server. ($e)');
+    }
+
+    if (resp.statusCode == 200) {
+      final b = jsonDecode(resp.body) as Map<String, dynamic>;
+      final a = b['activity'];
+      if (a is Map<String, dynamic>) return ActivityPlan.fromJson(a);
+      throw ApiException('The server returned no suggestions.');
+    }
+    if (resp.statusCode == 401) {
+      await AuthService.instance.logout();
+      throw ApiException('Your session expired. Please log in again.');
+    }
+    String message;
+    try {
+      final err = jsonDecode(resp.body);
+      final e = err is Map ? err['error'] : null;
+      message = e?.toString() ?? 'Could not suggest activities.';
+    } catch (_) {
+      message = 'Could not suggest activities (HTTP ${resp.statusCode}).';
     }
     throw ApiException(message);
   }

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../models/diet_plan.dart';
+import '../models/recipe.dart';
 import '../services/api_service.dart';
 import '../services/plan_storage.dart';
+import '../services/recipe_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fresh.dart';
+import 'paywall_screen.dart';
 
 /// A full recipe page for one meal: dish, macros, ingredients, and a one-tap
 /// swap for a different dish. Swapping persists to storage (so Today and the
@@ -28,7 +31,70 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
   late DietPlan _plan = widget.stored.plan;
   bool _swapping = false;
 
+  Recipe? _recipe;
+  bool _loadingRecipe = false;
+
   Meal get _meal => _plan.days[widget.dayIndex].meals[widget.mealIndex];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCachedRecipe();
+  }
+
+  /// Show a locally-cached recipe instantly (offline, no round-trip) if we have
+  /// one for this dish.
+  Future<void> _loadCachedRecipe() async {
+    final dish = _meal.dish.trim();
+    if (dish.isEmpty) return;
+    final cached = await RecipeStore.get(dish);
+    if (cached != null && mounted) setState(() => _recipe = cached);
+  }
+
+  /// Fetches preparation steps. Free on a cache hit (server or local); a miss
+  /// costs one credit (or is free on a subscription). Opens the paywall on 402.
+  Future<void> _getSteps() async {
+    if (_loadingRecipe) return;
+    final dish = _meal.dish.trim();
+    if (dish.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final req = widget.stored.request;
+
+    setState(() => _loadingRecipe = true);
+    try {
+      final recipe = await ApiService.getRecipe(<String, dynamic>{
+        'dish': dish,
+        'location': widget.stored.location.trim().isNotEmpty
+            ? widget.stored.location.trim()
+            : '${req?['location'] ?? ''}',
+        if (req?['dietaryPreference'] != null)
+          'dietaryPreference': req!['dietaryPreference'],
+        if (req?['allergies'] is List) 'allergies': req!['allergies'],
+      });
+      await RecipeStore.put(dish, recipe);
+      if (!mounted) return;
+      setState(() {
+        _recipe = recipe;
+        _loadingRecipe = false;
+      });
+    } on PaymentRequiredException catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingRecipe = false);
+      final bought = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => PaywallScreen(reason: e.message),
+      ));
+      if (bought == true && mounted) _getSteps(); // retry after buying
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingRecipe = false);
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingRecipe = false);
+      messenger.showSnackBar(const SnackBar(
+          content: Text("Couldn't get preparation steps. Please try again.")));
+    }
+  }
 
   Future<void> _swap() async {
     if (_swapping) return;
@@ -88,7 +154,9 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
       setState(() {
         _plan = merged;
         _swapping = false;
+        _recipe = null; // the dish changed — old steps no longer apply
       });
+      _loadCachedRecipe(); // show cached steps if we already have them for the new dish
       messenger.showSnackBar(SnackBar(
           content: Text(fresh.dish.isEmpty ? 'Meal swapped.' : 'Swapped to ${fresh.dish}.')));
     } on ApiException catch (e) {
@@ -151,7 +219,7 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                           shape: BoxShape.circle,
                           gradient: const RadialGradient(
                             center: Alignment(-0.35, -0.4),
-                            colors: [Color(0xFFFFB46B), Color(0xFFFF5D6D)],
+                            colors: AppColors.orbColors,
                           ),
                           boxShadow: coralGlow(opacity: 0.20, blur: 16, y: 5),
                         ),
@@ -230,6 +298,16 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                         ),
                       )),
                 ],
+                // ── how to make it
+                const SizedBox(height: 22),
+                if (_recipe != null)
+                  _RecipeView(recipe: _recipe!)
+                else
+                  _PrepStepsButton(
+                    loading: _loadingRecipe,
+                    onTap: _getSteps,
+                  ),
+
                 const SizedBox(height: 22),
                 _swapping
                     ? Container(
@@ -266,6 +344,169 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The call-to-action to fetch preparation steps, with an honest note on cost.
+class _PrepStepsButton extends StatelessWidget {
+  final bool loading;
+  final VoidCallback onTap;
+  const _PrepStepsButton({required this.loading, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    if (loading) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.field),
+          border: Border.all(color: AppColors.line),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+                width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 10),
+            Text('Writing the steps…',
+                style: text.titleSmall
+                    ?.copyWith(color: AppColors.inkMuted, fontWeight: FontWeight.w800)),
+          ],
+        ),
+      );
+    }
+    return Column(
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(AppRadius.field),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadius.field),
+                border: Border.all(color: AppColors.brand),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.menu_book_rounded, size: 18, color: AppColors.brand),
+                  const SizedBox(width: 9),
+                  Text('How to make it',
+                      style: text.titleSmall?.copyWith(
+                          color: AppColors.brand, fontWeight: FontWeight.w800)),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Generated once, then free forever — costs a credit only the first time '
+          'anyone makes this dish.',
+          textAlign: TextAlign.center,
+          style: text.bodySmall?.copyWith(color: AppColors.inkFaint, height: 1.4),
+        ),
+      ],
+    );
+  }
+}
+
+/// Renders a fetched recipe: time/servings, numbered steps, and any tips.
+class _RecipeView extends StatelessWidget {
+  final Recipe recipe;
+  const _RecipeView({required this.recipe});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.menu_book_rounded, size: 16, color: AppColors.brand),
+              const SizedBox(width: 8),
+              Text('HOW TO MAKE IT',
+                  style: text.labelSmall?.copyWith(
+                      color: AppColors.inkMuted,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                      fontSize: 9)),
+              const Spacer(),
+              if (recipe.prepMinutes > 0 || recipe.servings > 0)
+                Text(
+                  [
+                    if (recipe.prepMinutes > 0) '${recipe.prepMinutes} min',
+                    if (recipe.servings > 0) 'serves ${recipe.servings}',
+                  ].join(' · '),
+                  style: text.bodySmall?.copyWith(
+                      color: AppColors.inkMuted, fontWeight: FontWeight.w700),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...List.generate(recipe.steps.length, (i) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 22,
+                    height: 22,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppColors.brand.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text('${i + 1}',
+                        style: text.labelSmall?.copyWith(
+                            color: AppColors.brand,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 11)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(recipe.steps[i],
+                        style: text.bodyMedium?.copyWith(height: 1.45)),
+                  ),
+                ],
+              ),
+            );
+          }),
+          if (recipe.tips.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            ...recipe.tips.map((t) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.lightbulb_outline_rounded,
+                          size: 15, color: AppColors.accent),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(t,
+                            style: text.bodySmall?.copyWith(
+                                color: AppColors.inkMuted, height: 1.4)),
+                      ),
+                    ],
+                  ),
+                )),
+          ],
         ],
       ),
     );

@@ -359,9 +359,8 @@ class _CheckBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mint = MacroColors.protein;
-    final dark = AppColors.brightness == Brightness.dark;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
+      duration: motion(context, 150),
       width: 26,
       height: 26,
       decoration: BoxDecoration(
@@ -371,7 +370,7 @@ class _CheckBox extends StatelessWidget {
       ),
       child: checked
           ? Icon(Icons.check_rounded,
-              size: 16, color: dark ? const Color(0xFF062B1A) : Colors.white)
+              size: 16, color: AppColors.onMint)
           : null,
     );
   }
@@ -393,7 +392,7 @@ class _ProgressCard extends StatelessWidget {
         children: [
           Text('$done OF $total IN THE BASKET',
               style: text.labelSmall?.copyWith(
-                  color: AppColors.inkFaint,
+                  color: AppColors.inkMuted,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.2,
                   fontSize: 8.5)),
@@ -495,21 +494,26 @@ class _ScopeToggle extends StatelessWidget {
 
   Widget _seg(String label, bool sel, VoidCallback onTap) {
     return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: sel ? AppColors.brand : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-              color: sel ? Colors.white : AppColors.inkMuted,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            alignment: Alignment.center,
+            height: 40,
+            decoration: BoxDecoration(
+              color: sel ? AppColors.brand : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                color: sel ? Colors.white : AppColors.inkMuted,
+              ),
             ),
           ),
         ),
