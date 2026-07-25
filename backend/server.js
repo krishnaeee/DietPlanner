@@ -10,7 +10,7 @@ import { authRouter, requireAuth } from './auth.js';
 import { billingRouter, stripeWebhookHandler } from './billingRoutes.js';
 import { plansRouter } from './plansRoutes.js';
 import {
-  getEntitlements, spendCredits, addCredits, applyRetarget,
+  getEntitlements, spendCredits, addCredits, applyRetarget, getPlan,
   getRecipe, saveRecipe,
   getStoredActivity, saveActivity, getStoredReview, saveReview, pool,
 } from './db.js';
@@ -99,6 +99,26 @@ function validate(body) {
     errors.push('target weight must be below current weight for a lose goal');
   } else if (goal === 'gain' && targetWeightKg <= weightKg) {
     errors.push('target weight must be above current weight for a gain goal');
+  }
+
+  // ── Safety gate: refuse contraindicated weight-loss plans. Height is already
+  // collected, so BMI is free. Hard-blocked here (before the credit gate), and
+  // mirrored client-side. Not a substitute for professional screening.
+  if (goal === 'lose' && heightCm > 50) {
+    const m = heightCm / 100;
+    const curBmi = weightKg / (m * m);
+    const tgtBmi = effectiveTarget > 0 ? effectiveTarget / (m * m) : null;
+    const ageNum = body.age != null && body.age !== '' ? Math.round(num(body.age)) : null;
+    if (curBmi < 18.5) {
+      errors.push(
+        'A weight-loss plan is not safe at an underweight BMI. Choose an "eat healthy" plan and consult a healthcare professional.',
+      );
+    } else if (tgtBmi != null && tgtBmi < 18.5) {
+      errors.push('That target weight is underweight (BMI under 18.5). Choose a target that keeps you in a healthy range.');
+    }
+    if (ageNum != null && ageNum < 18) {
+      errors.push('Weight-loss plans are designed for adults. For under-18s, please work with a doctor or dietitian.');
+    }
   }
 
   const value = {
@@ -240,6 +260,17 @@ app.post('/api/plan', requireAuth, async (req, res) => {
   // No re-target inputs (or a first-week request) → generation is unchanged.
   let retarget = null;
   if (value.startDay > 1 && value.currentWeightKg) {
+    // The target the loop last set — lets decideRetarget suppress a no-op audit
+    // row when the recompute doesn't actually move the number.
+    let currentTarget = null;
+    if (value.planId) {
+      try {
+        const existing = await getPlan(req.user.id, value.planId);
+        currentTarget = existing?.currentCalorieTarget ?? null;
+      } catch (_) {
+        /* no stored plan → treat every recompute as a change (write the audit) */
+      }
+    }
     retarget = decideRetarget({
       startWeightKg: value.weightKg,
       currentWeightKg: value.currentWeightKg,
@@ -252,6 +283,7 @@ app.post('/api/plan', requireAuth, async (req, res) => {
       targetDays: value.targetDays,
       startDay: value.startDay,
       weighIns: value.weighIns,
+      currentTarget,
     });
     value.calorieOverride = retarget.newTarget; // generatePlan builds around this
     console.log(

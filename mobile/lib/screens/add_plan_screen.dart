@@ -48,12 +48,14 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
   final _whereKey = GlobalKey<FormState>(); // step 2 (location & duration)
   final _aboutKey = GlobalKey<FormState>(); // step 3 (about you)
 
-  final _weight = TextEditingController(text: '75');
-  final _height = TextEditingController(text: '163');
-  final _location = TextEditingController(text: 'pollachi');
-  final _targetWeight = TextEditingController(text: '65');
-  final _period = TextEditingController(text: '24');
-  final _age = TextEditingController(text: '36');
+  // Start empty — the field hints show example values and the "Required"
+  // validators enforce entry, so no user ever inherits someone else's numbers.
+  final _weight = TextEditingController();
+  final _height = TextEditingController();
+  final _location = TextEditingController();
+  final _targetWeight = TextEditingController();
+  final _period = TextEditingController();
+  final _age = TextEditingController();
   final _dietPref = TextEditingController();
   final _allergies = TextEditingController();
   final _planName = TextEditingController();
@@ -200,8 +202,61 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
   /// Chip picks + the free-text field, trimmed and de-duped case-insensitively.
   List<String> get _allergyList => mergeAllergies(_allergyPicks, _allergies.text);
 
+  /// A user-facing reason a plan would be unsafe to generate, or null. Mirrors
+  /// the server-side gate so the user hears it immediately (no wasted round-trip
+  /// or credit). Only weight-loss plans are gated — the contraindicated case.
+  String? _safetyBlock() {
+    final b = _bmi;
+    if (b == null) return null; // validators already handle missing/invalid input
+    if (_goal != 'lose') return null;
+    if (b.bmi < 18.5) {
+      return "Your BMI is ${b.bmi.toStringAsFixed(1)} — already in the underweight "
+          "range, so a weight-loss plan isn't safe. Consider an “eat healthy” "
+          "plan instead, and check with a doctor or dietitian.";
+    }
+    final t = double.tryParse(_targetWeight.text.trim());
+    final h = double.tryParse(_height.text.trim());
+    if (t != null && h != null && h > 0) {
+      final m = h / 100;
+      final targetBmi = t / (m * m);
+      if (targetBmi < 18.5) {
+        return "That target puts your BMI at ${targetBmi.toStringAsFixed(1)} "
+            "(underweight). Pick a target that keeps you in a healthy range — "
+            "“Use healthy target” sets a safe one.";
+      }
+    }
+    final age = int.tryParse(_age.text.trim());
+    if (age != null && age < 18) {
+      return "Weight-loss plans here are built for adults. If you're under 18, "
+          "please work with a doctor or dietitian.";
+    }
+    return null;
+  }
+
+  void _showSafetyBlock(String message) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Let’s keep this safe'),
+        content: Text(message),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Got it')),
+        ],
+      ),
+    );
+  }
+
   void _submit() {
     FocusScope.of(context).unfocus();
+    // Safety gate first — never route to the paywall or the server for a plan we
+    // won't generate (the server enforces the same rules as a hard backstop).
+    final block = _safetyBlock();
+    if (block != null) {
+      _showSafetyBlock(block);
+      return;
+    }
     // Each step was validated as the user advanced (its form was mounted then),
     // so we don't re-validate now — the earlier pages may be unmounted and their
     // form state null, which would silently pass. Gating on _next is the guard.
@@ -611,31 +666,48 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
       child: SafeArea(
         top: false,
         minimum: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (_step > 0) ...[
-              SizedBox(
-                height: 54,
-                child: OutlinedButton(
-                  onPressed: _back,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.inkMuted,
-                    side: BorderSide(color: AppColors.line),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.field)),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                  ),
-                  child: const Text('Back'),
+            // Shown at the generate step: a plan is general guidance, not care.
+            if (last)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'General guidance, not medical advice. Check with a professional before starting a new diet.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.inkFaint, height: 1.3, fontSize: 11),
                 ),
               ),
-              const SizedBox(width: 12),
-            ],
-            Expanded(
-              child: PrimaryButton(
-                label: last ? 'Generate my plan' : 'Continue',
-                icon: last ? Icons.auto_awesome_rounded : Icons.arrow_forward_rounded,
-                onPressed: _next,
-              ),
+            Row(
+              children: [
+                if (_step > 0) ...[
+                  SizedBox(
+                    height: 54,
+                    child: OutlinedButton(
+                      onPressed: _back,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.inkMuted,
+                        side: BorderSide(color: AppColors.line),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.field)),
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                      ),
+                      child: const Text('Back'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: PrimaryButton(
+                    label: last ? 'Generate my plan' : 'Continue',
+                    icon:
+                        last ? Icons.auto_awesome_rounded : Icons.arrow_forward_rounded,
+                    onPressed: _next,
+                  ),
+                ),
+              ],
             ),
           ],
         ),

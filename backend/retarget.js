@@ -68,12 +68,14 @@ export function decideRetarget(input) {
   };
 }
 
-// Signed kg/week from the first and last dated weigh-ins. Returns null when
+// Signed kg/week from the earliest and latest dated weigh-ins. Sorts by date
+// first, so an out-of-order series can't mislabel the trend. Returns null when
 // there aren't two usable, dated points to measure a rate from.
 export function weeklyTrend(weighIns) {
-  const pts = (weighIns || []).filter(
-    (w) => w && w.date != null && isFinite(Number(w.kg)),
-  );
+  const pts = (weighIns || [])
+    .filter((w) => w && w.date != null && isFinite(Number(w.kg)))
+    .slice()
+    .sort((x, y) => new Date(x.date).getTime() - new Date(y.date).getTime());
   if (pts.length < 2) return null;
   const a = pts[0];
   const b = pts[pts.length - 1];
