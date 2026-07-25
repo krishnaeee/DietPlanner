@@ -157,6 +157,21 @@ class PlanTracking {
   int extraCaloriesFor(int dayIndex) =>
       extrasFor(dayIndex).fold(0, (s, e) => s + e.calories);
 
+  /// Distinct off-plan items logged recently, most-recent first (deduped by
+  /// name, case-insensitively) — so a habitual coffee is one tap to re-log.
+  List<ExtraItem> recentExtras({int limit = 6}) {
+    final seen = <String>{};
+    final out = <ExtraItem>[];
+    for (final e in extras.reversed) {
+      final k = e.name.trim().toLowerCase();
+      if (k.isEmpty || seen.contains(k)) continue;
+      seen.add(k);
+      out.add(e);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
   double? get firstWeight => weighIns.isEmpty ? null : weighIns.first.kg;
   double? get latestWeight => weighIns.isEmpty ? null : weighIns.last.kg;
 
@@ -250,6 +265,90 @@ class PlanTracking {
     return days;
   }
 
+  /// The longest run of consecutive active days ever recorded for this plan.
+  int bestStreak(DateTime startDate) {
+    final active = activeDays(startDate);
+    if (active.isEmpty) return 0;
+    final dates = active.map(DateTime.parse).toList()..sort();
+    var best = 1, run = 1;
+    for (var i = 1; i < dates.length; i++) {
+      if (dates[i].difference(dates[i - 1]).inDays == 1) {
+        run++;
+        if (run > best) best = run;
+      } else {
+        run = 1;
+      }
+    }
+    return best;
+  }
+
+  /// A few plain-language insights from the user's own tracking — no LLM.
+  /// Empty until there's enough data to say something honest.
+  List<String> insights(DietPlan plan, DateTime startDate, DateTime today) {
+    final t = DateTime(today.year, today.month, today.day);
+    final out = <String>[];
+    final skips = <String, int>{};
+    final totals = <String, int>{};
+    var wdDone = 0, wdTot = 0, weDone = 0, weTot = 0;
+
+    for (var i = 0; i < plan.days.length; i++) {
+      final d = DateTime(startDate.year, startDate.month, startDate.day + i);
+      if (d.isAfter(t)) break;
+      final weekend =
+          d.weekday == DateTime.saturday || d.weekday == DateTime.sunday;
+      for (var m = 0; m < plan.days[i].meals.length; m++) {
+        final slot = plan.days[i].meals[m].name.trim();
+        if (slot.isNotEmpty) {
+          totals[slot] = (totals[slot] ?? 0) + 1;
+          if (isMealSkipped(i, m)) skips[slot] = (skips[slot] ?? 0) + 1;
+        }
+        final done = isMealDone(i, m);
+        if (weekend) {
+          weTot++;
+          if (done) weDone++;
+        } else {
+          wdTot++;
+          if (done) wdDone++;
+        }
+      }
+    }
+
+    // 1. Most-skipped meal slot.
+    String? topSlot;
+    var topSkips = 0, topTot = 0;
+    skips.forEach((slot, n) {
+      if (n > topSkips) {
+        topSkips = n;
+        topSlot = slot;
+        topTot = totals[slot] ?? 0;
+      }
+    });
+    if (topSlot != null && topSkips >= 2) {
+      out.add(
+          '$topSlot is your most-skipped meal — $topSkips of $topTot days. It gets lighter and more appealing when you extend the plan.');
+    }
+
+    // 2. Weekday vs weekend adherence gap.
+    if (wdTot >= 4 && weTot >= 2) {
+      final wd = (100 * wdDone / wdTot).round();
+      final we = (100 * weDone / weTot).round();
+      if ((wd - we).abs() >= 15) {
+        out.add(we < wd
+            ? 'Weekends are tougher — $we% adherence vs $wd% on weekdays. A little weekend prep goes a long way.'
+            : 'You do better on weekends — $we% vs $wd% on weekdays.');
+      }
+    }
+
+    // 3. Best streak, if it beats the current one.
+    final best = bestStreak(startDate);
+    final cur = currentStreak(today, startDate);
+    if (best >= 3 && best > cur) {
+      out.add('Your best streak so far: $best days. Think you can beat it? 🔥');
+    }
+
+    return out;
+  }
+
   /// Consecutive active days ending today (or yesterday). 0 if neither active.
   int currentStreak(DateTime today, DateTime startDate) {
     final active = activeDays(startDate);
@@ -264,6 +363,31 @@ class PlanTracking {
       cursor = cursor.subtract(const Duration(days: 1));
     }
     return streak;
+  }
+
+  /// Meal-slot names the user skips often (≥40% of started days, with at least
+  /// 3 data points) — a soft adaptation signal for the next week's generation.
+  List<String> frequentlySkippedSlots(
+      DietPlan plan, DateTime startDate, DateTime today) {
+    final t = DateTime(today.year, today.month, today.day);
+    final skips = <String, int>{};
+    final totals = <String, int>{};
+    for (var i = 0; i < plan.days.length; i++) {
+      final d = DateTime(startDate.year, startDate.month, startDate.day + i);
+      if (d.isAfter(t)) break;
+      for (var m = 0; m < plan.days[i].meals.length; m++) {
+        final slot = plan.days[i].meals[m].name.trim();
+        if (slot.isEmpty) continue;
+        totals[slot] = (totals[slot] ?? 0) + 1;
+        if (isMealSkipped(i, m)) skips[slot] = (skips[slot] ?? 0) + 1;
+      }
+    }
+    final out = <String>[];
+    totals.forEach((slot, total) {
+      final skipped = skips[slot] ?? 0;
+      if (total >= 3 && skipped / total >= 0.4) out.add(slot);
+    });
+    return out;
   }
 
   /// Meal adherence over the days that have already started.

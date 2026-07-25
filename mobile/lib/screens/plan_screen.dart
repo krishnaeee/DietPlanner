@@ -574,7 +574,11 @@ class _PlanViewState extends State<_PlanView> {
   /// Logs an off-plan item against the day the user is looking at — so an extra
   /// can be added to ANY day, not just today.
   Future<void> _addExtra(int dayIndex) async {
-    final item = await showAddExtraSheet(context, dayIndex);
+    final recent = _tracking
+        .recentExtras()
+        .map((e) => ExtraPreset(e.name, e.calories, e.protein, e.carbs, e.fat))
+        .toList();
+    final item = await showAddExtraSheet(context, dayIndex, recent: recent);
     if (item == null || !mounted) return;
     final next = _tracking.withExtra(item);
     setState(() => _tracking = next);
@@ -1021,6 +1025,10 @@ class _PlanViewState extends State<_PlanView> {
     // Adaptive re-target inputs: the backend re-paces the next week to the
     // user's latest weigh-in (only acts when there's a weigh-in and startDay>1).
     final latest = _tracking.latestWeight;
+    // Learn from behaviour: slots the user keeps skipping so the next week can
+    // make them lighter / more appealing.
+    final skippedSlots =
+        _tracking.frequentlySkippedSlots(_plan, _sp.startDate, DateTime.now());
     final body = <String, dynamic>{
       ...req,
       'startDay': nextStart,
@@ -1029,6 +1037,7 @@ class _PlanViewState extends State<_PlanView> {
       'currentWeightKg': ?latest,
       if (_tracking.weighIns.isNotEmpty)
         'weighIns': _tracking.weighIns.map((w) => w.toJson()).toList(),
+      if (skippedSlots.isNotEmpty) 'skippedSlots': skippedSlots,
     };
 
     setState(() => _extending = true);

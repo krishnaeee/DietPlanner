@@ -116,6 +116,8 @@ export function buildPrompt(input, plannedDays) {
     avoidDishes = [],
     allergies = [],
     cookingStyle,
+    skippedSlots = [], // meal slots the user often skips (adaptation signal)
+    dislikedDishes = [], // dishes the user swapped away from
   } = input;
 
   const endDay = startDay + plannedDays - 1;
@@ -158,6 +160,22 @@ export function buildPrompt(input, plannedDays) {
   const avoidLine = avoidDishes.length
     ? `\n- Do NOT reuse any of these dishes already planned earlier — pick different meals: ${avoidDishes.join(', ')}.`
     : '';
+
+  // Adaptation from the user's own behaviour on the earlier weeks. Skips are a
+  // soft signal (adjust that slot); swaps are an explicit "not this".
+  const prefsParts = [];
+  if (skippedSlots.length) {
+    const slots = skippedSlots.join(', ');
+    prefsParts.push(
+      `\n- The user frequently skips ${slots}. Make ${skippedSlots.length > 1 ? 'those meals' : 'that meal'} lighter, quicker and more appealing (or trim its size and redistribute those calories across the other meals).`,
+    );
+  }
+  if (dislikedDishes.length) {
+    prefsParts.push(
+      `\n- The user disliked and swapped away these dishes — do NOT plan them or close variants: ${dislikedDishes.join(', ')}.`,
+    );
+  }
+  const prefsLine = prefsParts.join('');
 
   // The goal line + calorie instruction differ for "eat healthy" (maintain) vs
   // a weight-change goal.
@@ -215,7 +233,7 @@ Requirements:${allergyRule}
 - Plan exactly ${plannedDays} day(s), numbered ${startDay} to ${endDay}.
 - Each day must include Breakfast, Lunch, Dinner, and one Snack (4 meals).
 - Use dishes and ingredients that are local, regional, and commonly available in ${location}.
-- Vary the dishes across days so the plan does not get repetitive.${avoidLine}
+- Vary the dishes across days so the plan does not get repetitive.${avoidLine}${prefsLine}
 - For every meal, list its ingredients with realistic shopping quantities.
 - For every meal, give realistic calories and macros (protein, carbs, fat in grams). Each day's meal calories should add up close to the daily calorie target.
 ${calorieLine}

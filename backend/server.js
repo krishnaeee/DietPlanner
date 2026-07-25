@@ -190,6 +190,22 @@ function validate(body) {
       .slice(0, 40); // cap so the prompt stays bounded
   }
 
+  // Adaptation signals from earlier weeks (continuation only). Skipped meal
+  // slots and dishes the user swapped away — both let the next week adapt.
+  const MEAL_SLOTS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  if (Array.isArray(body.skippedSlots)) {
+    const slots = body.skippedSlots
+      .filter((s) => MEAL_SLOTS.includes(s))
+      .slice(0, 4);
+    if (slots.length) value.skippedSlots = slots;
+  }
+  if (Array.isArray(body.dislikedDishes)) {
+    value.dislikedDishes = body.dislikedDishes
+      .filter((d) => typeof d === 'string' && d.trim())
+      .map((d) => d.trim())
+      .slice(0, 20);
+  }
+
   // Adaptive re-target inputs (only meaningful on a continuation week). The
   // client sends its latest weigh-in + trend so the next week can be re-paced to
   // real progress; planId lets the decision be persisted to the audit trail.

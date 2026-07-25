@@ -8,6 +8,7 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../models/diet_plan.dart';
+import '../models/tracking.dart';
 import 'plan_storage.dart';
 import 'tracking_storage.dart';
 
@@ -154,11 +155,13 @@ class NotificationService {
       var count = 0;
       // Meal/grocery reminders require BOTH the plan's own flag and the global
       // master switch to be on.
+      final tracking = await TrackingStorage.load(sp.id);
       if (sp.remindersScheduled && remindersEnabled.value) {
         count += await _scheduleOne(sp, now);
+        // Re-engagement nudges ride the same opt-in as meal/grocery reminders.
+        count += await _scheduleEngagement(sp, tracking, now);
       }
       // Hydration reminders are independent of the meal/grocery master switch.
-      final tracking = await TrackingStorage.load(sp.id);
       if (tracking.waterRemindersOn) count += await _scheduleWater(sp, now);
       if (count > 0) counts[sp.id] = count;
     }
@@ -211,6 +214,55 @@ class NotificationService {
         channelId: _waterChannelId,
         match: DateTimeComponents.time, // repeat daily at this time
         payload: jsonEncode({'planId': sp.id, 'day': -1, 'meal': -1, 'type': 'water'}),
+      );
+      count++;
+    }
+    return count;
+  }
+
+  /// Retention nudges (ID band 70000, below water's 80000): a weekly weigh-in
+  /// reminder and a "comeback" nudge that only fires if the user goes quiet —
+  /// it re-anchors to their latest activity on every reschedule, so it slides
+  /// forward as long as they keep logging.
+  Future<int> _scheduleEngagement(
+      StoredPlan sp, PlanTracking tracking, tz.TZDateTime now) async {
+    final base = sp.slot * 100000;
+    final tag = sp.name.trim().isEmpty ? '' : ' · ${sp.name.trim()}';
+    final start = sp.startDate;
+    var count = 0;
+
+    // Weekly weigh-in — one reminder that repeats weekly on the start weekday.
+    var weigh =
+        tz.TZDateTime(tz.local, start.year, start.month, start.day, 9, 0);
+    while (!weigh.isAfter(now)) {
+      weigh = weigh.add(const Duration(days: 7));
+    }
+    await _scheduleAt(
+      id: base + 70000,
+      title: '⚖️ Weekly weigh-in$tag',
+      body: 'Log your weight to keep your trend — and your plan — on track.',
+      when: weigh,
+      match: DateTimeComponents.dayOfWeekAndTime, // weekly
+      payload: jsonEncode({'planId': sp.id, 'day': -1, 'meal': -1, 'type': 'weighin'}),
+    );
+    count++;
+
+    // Comeback — 2 days after the most recent active day, at 6 PM.
+    final active = tracking.activeDays(start);
+    final lastActive = active.isEmpty
+        ? DateTime(start.year, start.month, start.day)
+        : active.map(DateTime.parse).reduce((a, b) => a.isAfter(b) ? a : b);
+    final comeback = tz.TZDateTime(
+            tz.local, lastActive.year, lastActive.month, lastActive.day, 18, 0)
+        .add(const Duration(days: 2));
+    if (comeback.isAfter(now)) {
+      await _scheduleAt(
+        id: base + 70010,
+        title: '👋 We miss you$tag',
+        body: 'Your plan is waiting — log a meal or a weigh-in to keep your streak alive.',
+        when: comeback,
+        payload:
+            jsonEncode({'planId': sp.id, 'day': -1, 'meal': -1, 'type': 'comeback'}),
       );
       count++;
     }

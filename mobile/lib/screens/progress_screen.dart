@@ -32,6 +32,10 @@ class _ProgressScreenState extends State<ProgressScreen> {
 
   StoredPlan get _sp => widget.stored;
 
+  /// Local, no-LLM insights from the user's own tracking.
+  List<String> get _insights =>
+      _t.insights(_sp.plan, _sp.startDate, DateTime.now());
+
   @override
   void initState() {
     super.initState();
@@ -159,6 +163,10 @@ class _ProgressScreenState extends State<ProgressScreen> {
                                       _AdherenceCard(stored: _sp, tracking: _t)),
                             ],
                           ),
+                          if (_insights.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            _InsightsCard(insights: _insights),
+                          ],
                           const SizedBox(height: 14),
                           _WaterCard(
                             tracking: _t,
@@ -291,6 +299,58 @@ class _LogWeightSheetState extends State<_LogWeightSheet> {
             width: double.infinity,
             child: FilledButton(onPressed: _save, child: const Text('Save weight')),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Plain-language patterns spotted in the user's own tracking (no LLM).
+class _InsightsCard extends StatelessWidget {
+  final List<String> insights;
+  const _InsightsCard({required this.insights});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.auto_graph_rounded, size: 16, color: AppColors.accent),
+              const SizedBox(width: 8),
+              Text('WHAT WE\'RE SEEING',
+                  style: text.labelSmall?.copyWith(
+                      color: AppColors.inkFaint,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                      fontSize: 9)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...insights.map((s) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      margin: const EdgeInsets.only(top: 6),
+                      decoration: BoxDecoration(
+                          color: AppColors.accent, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(s,
+                          style: text.bodyMedium?.copyWith(
+                              height: 1.4, fontWeight: FontWeight.w500)),
+                    ),
+                  ],
+                ),
+              )),
         ],
       ),
     );

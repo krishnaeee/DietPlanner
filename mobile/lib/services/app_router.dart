@@ -44,7 +44,9 @@ Future<void> routeFromNotification(String payload) async {
   if (nav == null) return;
   // Hydration nudges open the progress dashboard; grocery reminders open the
   // grocery list for that day; meal reminders open the plan at that meal.
-  if (type == 'water') {
+  // Hydration + weigh-in nudges open the progress dashboard (weight + water);
+  // the comeback nudge falls through to open the plan itself.
+  if (type == 'water' || type == 'weighin') {
     nav.push(MaterialPageRoute(builder: (_) => ProgressScreen(stored: sp)));
     return;
   }

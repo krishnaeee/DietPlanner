@@ -33,21 +33,27 @@ const kExtraPresets = <ExtraPreset>[
   ExtraPreset('Chocolate (30g)', 170, 2, 13, 12),
 ];
 
-/// Bottom sheet for logging an off-plan item on [dayIndex]. Returns the new
-/// item, or null if dismissed.
-Future<ExtraItem?> showAddExtraSheet(BuildContext context, int dayIndex) {
+/// Bottom sheet for logging an off-plan item on [dayIndex]. [recent] is the
+/// user's recently-logged items, shown as one-tap chips. Returns the new item,
+/// or null if dismissed.
+Future<ExtraItem?> showAddExtraSheet(
+  BuildContext context,
+  int dayIndex, {
+  List<ExtraPreset> recent = const [],
+}) {
   return showModalBottomSheet<ExtraItem>(
     context: context,
     isScrollControlled: true, // so the keyboard doesn't cover the fields
     useSafeArea: true, // keep content clear of the status bar / home indicator
     backgroundColor: Colors.transparent,
-    builder: (_) => _AddExtraSheet(dayIndex: dayIndex),
+    builder: (_) => _AddExtraSheet(dayIndex: dayIndex, recent: recent),
   );
 }
 
 class _AddExtraSheet extends StatefulWidget {
   final int dayIndex;
-  const _AddExtraSheet({required this.dayIndex});
+  final List<ExtraPreset> recent;
+  const _AddExtraSheet({required this.dayIndex, this.recent = const []});
 
   @override
   State<_AddExtraSheet> createState() => _AddExtraSheetState();
@@ -140,6 +146,26 @@ class _AddExtraSheetState extends State<_AddExtraSheet> {
                     ?.copyWith(color: AppColors.inkMuted, height: 1.4),
               ),
               const SizedBox(height: 16),
+              // One-tap re-log of things you've logged before.
+              if (widget.recent.isNotEmpty) ...[
+                _SectionLabel('RECENT'),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: widget.recent
+                      .map((p) => _PresetChip(
+                            label: p.name,
+                            kcal: p.calories,
+                            selected: _picked?.name == p.name,
+                            onTap: () => _choose(p),
+                          ))
+                      .toList(),
+                ),
+                const SizedBox(height: 16),
+                _SectionLabel('COMMON'),
+                const SizedBox(height: 8),
+              ],
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -198,6 +224,20 @@ class _AddExtraSheetState extends State<_AddExtraSheet> {
       ),
     );
   }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: AppColors.inkFaint,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.0,
+            fontSize: 9),
+      );
 }
 
 class _PresetChip extends StatelessWidget {

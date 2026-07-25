@@ -8,6 +8,7 @@ import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/add_extra_sheet.dart';
 import '../widgets/fresh.dart';
+import 'add_plan_screen.dart';
 import 'diet_settings_screen.dart';
 import 'grocery_list_screen.dart';
 import 'meal_detail_screen.dart';
@@ -35,6 +36,16 @@ class _TodayScreenState extends State<TodayScreen> {
 
   /// Whether the "yesterday's unlogged meals" recovery list is expanded.
   bool _recoverOpen = false;
+
+  /// Days since the last weigh-in, or null if none logged yet.
+  int? get _daysSinceWeighIn {
+    if (_tracking.weighIns.isEmpty) return null;
+    final last = _tracking.weighIns.last.date;
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day)
+        .difference(DateTime(last.year, last.month, last.day))
+        .inDays;
+  }
 
   @override
   void initState() {
@@ -93,9 +104,50 @@ class _TodayScreenState extends State<TodayScreen> {
     await TrackingStorage.save(_plan.id, next);
   }
 
+  /// Quick weigh-in from the daily loop (the trend that drives the whole plan
+  /// otherwise lives only behind a pill in Progress).
+  Future<void> _logWeight() async {
+    final ctrl = TextEditingController(
+      text: (_tracking.latestWeight != null && _tracking.latestWeight! > 0)
+          ? _tracking.latestWeight!.toStringAsFixed(1).replaceAll('.0', '')
+          : '',
+    );
+    final kg = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Today's weight"),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(suffixText: 'kg'),
+          onSubmitted: (_) =>
+              Navigator.pop(ctx, double.tryParse(ctrl.text.trim())),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, double.tryParse(ctrl.text.trim())),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (kg == null || kg <= 0 || kg >= 500 || !mounted) return;
+    final next = _tracking.withWeighIn(DateTime.now(), kg);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(_plan.id, next);
+  }
+
   /// Logs an off-plan item (snack, tea, coffee) against [dayIndex].
   Future<void> _addExtra(int dayIndex) async {
-    final item = await showAddExtraSheet(context, dayIndex);
+    final recent = _tracking
+        .recentExtras()
+        .map((e) => ExtraPreset(e.name, e.calories, e.protein, e.carbs, e.fat))
+        .toList();
+    final item = await showAddExtraSheet(context, dayIndex, recent: recent);
     if (item == null || !mounted) return;
     final next = _tracking.withExtra(item);
     setState(() => _tracking = next);
@@ -115,6 +167,26 @@ class _TodayScreenState extends State<TodayScreen> {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => MealDetailScreen(
             stored: _plan, dayIndex: dayIndex, mealIndex: mealIndex),
+      ));
+
+  /// Seeds a re-plan from the finished plan's original request, updated to the
+  /// user's current weight (and switched to maintain when asked).
+  Map<String, dynamic> _replanSeed({required bool maintain}) {
+    final seed = Map<String, dynamic>.from(_plan.request ?? const {});
+    final current = _tracking.latestWeight ?? _plan.startWeightKg;
+    if (current != null) seed['weightKg'] = current;
+    if (maintain) {
+      seed['goal'] = 'maintain';
+      seed.remove('targetWeightKg');
+    }
+    return seed;
+  }
+
+  /// Opens the create wizard pre-filled with [_replanSeed], so finishing a plan
+  /// flows straight into the next one instead of a dead-end.
+  void _openReplan({required bool maintain}) =>
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => AddPlanScreen(seed: _replanSeed(maintain: maintain)),
       ));
 
   @override
@@ -181,13 +253,32 @@ class _TodayScreenState extends State<TodayScreen> {
           ]
         : const <int>[];
 
+    // True completion = lived past the last day AND the whole journey is
+    // generated (vs. just needing the next week loaded in the Plan tab).
+    final journeyComplete =
+        ds.finished && plan.days.length >= plan.requestedDays;
+    final goalStr = (_plan.request?['goal'] ?? '').toString();
+    final target = _plan.targetWeightKg;
+    final startW = _plan.startWeightKg;
+    final currentW = _tracking.latestWeight ?? startW;
+    bool reached;
+    if (goalStr == 'maintain' || target == null || currentW == null) {
+      reached = true; // completing a maintain plan is itself the win
+    } else if (goalStr == 'gain') {
+      reached = currentW >= target - 0.3;
+    } else {
+      reached = currentW <= target + 0.3; // lose
+    }
+
     final now = DateTime.now();
     var micro =
         '${_kWeekdaysUp[now.weekday - 1]} · ${_kMonthsUp[now.month - 1]} ${now.day}';
     if (ds.upcoming) {
       micro += ' · STARTS SOON';
-    } else if (ds.finished) {
+    } else if (journeyComplete) {
       micro += ' · PLAN COMPLETE';
+    } else if (ds.finished) {
+      micro += ' · NEXT DAYS READY TO LOAD';
     }
     if (streak > 0) micro += ' · 🔥 $streak-DAY STREAK';
 
@@ -239,6 +330,33 @@ class _TodayScreenState extends State<TodayScreen> {
                 ],
               ),
               const SizedBox(height: 18),
+
+              // ── plan complete: celebrate the result + point at what's next
+              if (journeyComplete) ...[
+                _PlanCompleteCard(
+                  reached: reached,
+                  startWeightKg: startW,
+                  currentWeightKg: currentW,
+                  targetWeightKg: target,
+                  adherence:
+                      _tracking.adherence(plan, _plan.startDate, DateTime.now()),
+                  streak: streak,
+                  onContinue: () => _openReplan(maintain: false),
+                  onMaintain: () => _openReplan(maintain: true),
+                ),
+                const SizedBox(height: 18),
+              ],
+
+              // ── weigh-in strip: the trend that drives the plan, in the loop
+              if (!ds.upcoming && !journeyComplete) ...[
+                _WeighInStrip(
+                  currentKg: _tracking.latestWeight,
+                  targetKg: _plan.targetWeightKg,
+                  daysSinceWeighIn: _daysSinceWeighIn,
+                  onLog: _logWeight,
+                ),
+                const SizedBox(height: 16),
+              ],
 
               // ── the ring, straight on the canvas
               Center(child: CalorieRing(consumed: kcal, target: plan.dailyCalorieTarget)),
@@ -521,6 +639,228 @@ class _AllDoneCard extends StatelessWidget {
                     ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w800)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The weigh-in strip in the daily loop: nudges a weigh-in when due, otherwise
+/// shows the current weight and distance to target. Tapping it logs a weight.
+class _WeighInStrip extends StatelessWidget {
+  final double? currentKg;
+  final double? targetKg;
+  final int? daysSinceWeighIn; // null = never logged
+  final VoidCallback onLog;
+  const _WeighInStrip({
+    required this.currentKg,
+    required this.targetKg,
+    required this.daysSinceWeighIn,
+    required this.onLog,
+  });
+
+  static String _kg(double v) {
+    final s = v.abs().toStringAsFixed(1);
+    return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final amber = AppColors.accent;
+    final due = daysSinceWeighIn == null || daysSinceWeighIn! >= 7;
+
+    String? toGo;
+    if (currentKg != null && targetKg != null) {
+      final d = (currentKg! - targetKg!).abs();
+      toGo = d < 0.3 ? 'at your target 🎯' : '${_kg(d)} kg to go';
+    }
+
+    final title = due
+        ? (daysSinceWeighIn == null ? 'Log your starting weight' : 'Time to weigh in')
+        : '${currentKg != null ? '${_kg(currentKg!)} kg' : 'Weight'}'
+            '${toGo != null ? ' · $toGo' : ''}';
+    final sub = due
+        ? 'Your weight trend is what keeps the plan on track.'
+        : (daysSinceWeighIn == 0
+            ? 'Logged today'
+            : 'Logged ${daysSinceWeighIn}d ago · tap to update');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: due ? amber.withValues(alpha: 0.10) : AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: due ? Colors.transparent : AppColors.line),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onLog,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.monitor_weight_rounded,
+                    size: 18, color: due ? amber : AppColors.inkMuted),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: text.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w800, height: 1.2)),
+                      const SizedBox(height: 2),
+                      Text(sub,
+                          style: text.bodySmall?.copyWith(
+                              color: AppColors.inkMuted, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (due)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                        color: amber, borderRadius: BorderRadius.circular(30)),
+                    child: Text('Log',
+                        style: text.labelSmall?.copyWith(
+                            color: AppColors.bg,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 11)),
+                  )
+                else
+                  Icon(Icons.edit_rounded, size: 15, color: AppColors.inkFaint),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown when the whole journey is complete: a celebratory recap of the result
+/// and a goal-aware invitation to keep going (never a dead-end).
+class _PlanCompleteCard extends StatelessWidget {
+  final bool reached;
+  final double? startWeightKg;
+  final double? currentWeightKg;
+  final double? targetWeightKg;
+  final ({int done, int total, int elapsedDays}) adherence;
+  final int streak;
+  final VoidCallback onContinue;
+  final VoidCallback onMaintain;
+  const _PlanCompleteCard({
+    required this.reached,
+    required this.startWeightKg,
+    required this.currentWeightKg,
+    required this.targetWeightKg,
+    required this.adherence,
+    required this.streak,
+    required this.onContinue,
+    required this.onMaintain,
+  });
+
+  static String _kg(double v) {
+    final s = v.abs().toStringAsFixed(1);
+    return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final mint = MacroColors.protein;
+    final delta = (startWeightKg != null && currentWeightKg != null)
+        ? currentWeightKg! - startWeightKg!
+        : null;
+    final pct =
+        adherence.total == 0 ? 0 : (100 * adherence.done ~/ adherence.total);
+
+    final recap = delta != null
+        ? 'You went ${_kg(startWeightKg!)} → ${_kg(currentWeightKg!)} kg '
+            '(${delta < 0 ? '−' : '+'}${_kg(delta)} kg) over ${adherence.elapsedDays} days.'
+        : 'Nice work sticking with it over ${adherence.elapsedDays} days.';
+
+    Widget stat(String value, String label, Color color) => Expanded(
+          child: Column(
+            children: [
+              Text(value,
+                  style: text.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w900, color: color)),
+              const SizedBox(height: 2),
+              Text(label,
+                  style: text.labelSmall?.copyWith(
+                      color: AppColors.inkMuted,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 9,
+                      letterSpacing: 0.5)),
+            ],
+          ),
+        );
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: AppColors.auroraGradient,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: const EdgeInsets.all(1.5),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18.5),
+        ),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(reached ? '🎉' : '💪', style: const TextStyle(fontSize: 22)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(reached ? 'Goal reached!' : 'Plan complete',
+                      style: text.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900, letterSpacing: -0.4)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(recap,
+                style: text.bodyMedium
+                    ?.copyWith(color: AppColors.inkMuted, height: 1.4)),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                if (delta != null)
+                  stat('${delta < 0 ? '−' : '+'}${_kg(delta)} kg', 'CHANGE',
+                      delta < 0 ? mint : AppColors.ink),
+                stat('$pct%', 'ADHERENCE', mint),
+                stat('🔥 $streak', streak == 1 ? 'DAY' : 'DAYS', AppColors.ink),
+              ],
+            ),
+            const SizedBox(height: 18),
+            GradientButton(
+              label: reached
+                  ? 'Maintain this weight'
+                  : (targetWeightKg != null
+                      ? 'Keep going toward ${_kg(targetWeightKg!)} kg'
+                      : 'Keep going'),
+              icon: reached
+                  ? Icons.self_improvement_rounded
+                  : Icons.trending_flat_rounded,
+              onPressed: reached ? onMaintain : onContinue,
+            ),
+            const SizedBox(height: 4),
+            Center(
+              child: TextButton(
+                onPressed: reached ? onContinue : onMaintain,
+                child: Text(reached ? 'Set a new goal' : 'Switch to maintain'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

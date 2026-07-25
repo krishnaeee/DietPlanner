@@ -34,7 +34,11 @@ List<String> mergeAllergies(Iterable<String> picks, String freeText) {
 }
 
 class AddPlanScreen extends StatefulWidget {
-  const AddPlanScreen({super.key});
+  /// Optional prefill (the shape of the /api/plan request) — used to seed a
+  /// "re-plan from where you are" after a plan completes, so the user confirms
+  /// rather than re-enters everything. Null for a fresh plan.
+  final Map<String, dynamic>? seed;
+  const AddPlanScreen({super.key, this.seed});
 
   @override
   State<AddPlanScreen> createState() => _AddPlanScreenState();
@@ -75,10 +79,52 @@ class _AddPlanScreenState extends State<AddPlanScreen> {
   @override
   void initState() {
     super.initState();
+    _applySeed(widget.seed);
     _weight.addListener(_refresh);
     _targetWeight.addListener(_refresh);
     _height.addListener(_refresh);
     _dietPref.addListener(_refresh); // keep the quick-pick chips in sync
+  }
+
+  /// Pre-populates the wizard from a prior plan request (a re-plan). Only sets
+  /// fields present in [seed]; validators still gate anything left blank.
+  void _applySeed(Map<String, dynamic>? seed) {
+    if (seed == null) return;
+    String str(dynamic v) => '${v ?? ''}'.trim();
+    void setNum(TextEditingController c, dynamic v) {
+      final n = v is num ? v : num.tryParse('${v ?? ''}');
+      if (n != null) c.text = n == n.roundToDouble() ? '${n.round()}' : '$n';
+    }
+
+    setNum(_weight, seed['weightKg']);
+    setNum(_height, seed['heightCm']);
+    setNum(_targetWeight, seed['targetWeightKg']);
+    setNum(_age, seed['age']);
+    if (str(seed['location']).isNotEmpty) _location.text = str(seed['location']);
+    final days = seed['targetDays'];
+    if (days is num && days > 0) {
+      _period.text = '${days.round()}';
+      _periodUnit = 'days';
+    }
+    if (const ['lose', 'gain', 'maintain'].contains(seed['goal'])) {
+      _goal = '${seed['goal']}';
+    }
+    if (const ['male', 'female', 'other'].contains(seed['sex'])) {
+      _sex = '${seed['sex']}';
+    }
+    if (seed['activityLevel'] is String) _activity = '${seed['activityLevel']}';
+    if (const ['everyday', 'less_oil', 'steamed', 'mixed']
+        .contains(seed['cookingStyle'])) {
+      _cookingStyle = '${seed['cookingStyle']}';
+    }
+    if (str(seed['dietaryPreference']).isNotEmpty) {
+      _dietPref.text = str(seed['dietaryPreference']);
+    }
+    final allergies = seed['allergies'];
+    if (allergies is List && allergies.isNotEmpty) {
+      _allergies.text =
+          allergies.map((a) => '$a'.trim()).where((a) => a.isNotEmpty).join(', ');
+    }
   }
 
   void _refresh() => setState(() {});
