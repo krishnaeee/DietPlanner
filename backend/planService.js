@@ -214,7 +214,7 @@ export async function generateReview(input) {
   const result = await provider.generate({
     system,
     user,
-    maxTokens: 1500,
+    maxTokens: 2600,
     effort: 'low',
     schema: REVIEW_SCHEMA,
   });
@@ -229,7 +229,7 @@ export async function generateActivity(input) {
   const result = await provider.generate({
     system,
     user,
-    maxTokens: 2000,
+    maxTokens: 4200,
     effort: 'low',
     schema: ACTIVITY_SCHEMA,
   });

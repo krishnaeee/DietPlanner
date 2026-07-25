@@ -30,7 +30,26 @@ class _ReviewScreenState extends State<ReviewScreen> {
   @override
   void initState() {
     super.initState();
-    _fetch();
+    _init();
+  }
+
+  /// Show the last stored review immediately if one exists; only generate on the
+  /// very first open. "Review again" is the explicit refresh.
+  Future<void> _init() async {
+    try {
+      final stored = await ApiService.getStoredReview(_sp.id);
+      if (!mounted) return;
+      if (stored != null) {
+        setState(() {
+          _review = stored;
+          _loading = false;
+        });
+        return;
+      }
+    } catch (_) {
+      // Stored-read failed (offline / server issue) — fall through and generate.
+    }
+    await _fetch();
   }
 
   /// Days since the plan started, 1-based and clamped to the plan length.
@@ -49,6 +68,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     final a = _t.adherence(_sp.plan, _sp.startDate, DateTime.now());
     final goal = (_sp.request?['goal'] ?? '').toString();
     final body = <String, dynamic>{
+      'planId': _sp.id,
       'goal': goal.isNotEmpty ? goal : 'maintain',
       'startWeightKg': _sp.startWeightKg ?? _t.firstWeight,
       'targetWeightKg': _sp.targetWeightKg,
@@ -186,8 +206,12 @@ class _ReviewBody extends StatelessWidget {
           Text(review.summary,
               style: text.bodyLarge?.copyWith(color: AppColors.ink, height: 1.55)),
         ],
+        if (review.metrics.isNotEmpty) ...[
+          const SizedBox(height: 22),
+          _MetricsBlock(metrics: review.metrics),
+        ],
         if (review.doingWell.isNotEmpty) ...[
-          const SizedBox(height: 24),
+          const SizedBox(height: 18),
           _ReviewList(
               label: 'DOING WELL',
               icon: Icons.check_circle_rounded,
@@ -195,14 +219,229 @@ class _ReviewBody extends StatelessWidget {
               items: review.doingWell),
         ],
         if (review.improve.isNotEmpty) ...[
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           _ReviewList(
               label: 'FOCUS ON',
               icon: Icons.trending_up_rounded,
               color: AppColors.brand,
               items: review.improve),
         ],
+        if (review.actionPlan.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _ActionPlanCard(items: review.actionPlan),
+        ],
+        if (review.outlook.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _OutlookCard(text: review.outlook),
+        ],
       ],
+    );
+  }
+}
+
+/// Direction → colour for a metric row. good=mint, watch=amber, off=coral.
+Color _trendColor(String trend) {
+  switch (trend) {
+    case 'watch':
+      return AppColors.accent;
+    case 'off':
+      return AppColors.brand;
+    default:
+      return MacroColors.protein;
+  }
+}
+
+/// "By the numbers" — the data read-out, always visible. One stat row per
+/// metric: label, bold value, a one-line interpretation, dot coloured by trend.
+class _MetricsBlock extends StatelessWidget {
+  final List<ReviewMetric> metrics;
+  const _MetricsBlock({required this.metrics});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(15, 14, 15, 4),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('BY THE NUMBERS',
+              style: text.labelSmall?.copyWith(
+                  color: AppColors.inkFaint,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                  fontSize: 9)),
+          const SizedBox(height: 14),
+          ...metrics.map((m) => _row(context, m)),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, ReviewMetric m) {
+    final text = Theme.of(context).textTheme;
+    final dim = m.isThin;
+    final c = dim ? AppColors.inkFaint : _trendColor(m.trend);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            margin: const EdgeInsets.only(top: 5),
+            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(m.label.toUpperCase(),
+                    style: text.labelSmall?.copyWith(
+                        color: AppColors.inkMuted,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                        fontSize: 9)),
+                const SizedBox(height: 3),
+                Text(m.value,
+                    style: text.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: dim ? AppColors.inkMuted : AppColors.ink)),
+                if (m.read.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(m.read,
+                      style: text.bodySmall
+                          ?.copyWith(color: AppColors.inkFaint, height: 1.35)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Next steps" — the prescription, as a coral-numbered checklist.
+class _ActionPlanCard extends StatelessWidget {
+  final List<String> items;
+  const _ActionPlanCard({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(15, 14, 15, 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.flag_rounded, size: 15, color: AppColors.brand),
+              const SizedBox(width: 8),
+              Text('NEXT STEPS',
+                  style: text.labelSmall?.copyWith(
+                      color: AppColors.brand,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                      fontSize: 9)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          for (var i = 0; i < items.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 20,
+                    child: Text('${i + 1}',
+                        style: text.bodyMedium?.copyWith(
+                            color: AppColors.brand,
+                            fontWeight: FontWeight.w900,
+                            height: 1.35)),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(items[i],
+                        style: text.bodyMedium?.copyWith(
+                            height: 1.4, fontWeight: FontWeight.w500)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Outlook" — the hedged forward projection, visually quieted with an
+/// ESTIMATE tag so it never reads as a promise.
+class _OutlookCard extends StatelessWidget {
+  final String text;
+  const _OutlookCard({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(15, 12, 15, 14),
+      decoration: BoxDecoration(
+        color: AppColors.fieldFill,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.timeline_rounded, size: 15, color: AppColors.inkMuted),
+              const SizedBox(width: 8),
+              Text('OUTLOOK',
+                  style: t.labelSmall?.copyWith(
+                      color: AppColors.inkFaint,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                      fontSize: 9)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.inkFaint.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text('ESTIMATE',
+                    style: t.labelSmall?.copyWith(
+                        color: AppColors.inkMuted,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                        fontSize: 8)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(text,
+              style: t.bodyMedium?.copyWith(
+                  color: AppColors.inkMuted,
+                  height: 1.5,
+                  fontStyle: FontStyle.italic)),
+        ],
+      ),
     );
   }
 }

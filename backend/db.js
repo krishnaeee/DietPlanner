@@ -194,6 +194,31 @@ await pool.query(`
   );
 `);
 
+// Latest generated activity suggestions per plan + scope. Unlike recipes this is
+// per-user/plan (it's tailored to their goal & stats), so a re-open returns the
+// SAME suggestions instead of regenerating. Latest-wins on regenerate.
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS activity_suggestions (
+    plan_id    TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope      TEXT NOT NULL,                    -- 'day' | 'week'
+    activity   JSONB NOT NULL,                   -- {headline, warmup, activities[], progression, safety, tip}
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (plan_id, scope)
+  );
+`);
+
+// Latest progress review per plan — one snapshot, replaced only when the user
+// asks to review again. Keeps the review stable across re-opens.
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS review_snapshots (
+    plan_id    TEXT PRIMARY KEY REFERENCES plans(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    review     JSONB NOT NULL,                   -- {headline, status, summary, metrics[], ...}
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+`);
+
 // ─────────────────────────────────────────────────────────────── users ──
 
 export async function createUser(email, passwordHash) {
@@ -671,6 +696,65 @@ export async function saveRecipe(dish, recipe, userId) {
      ON CONFLICT (dish_key) DO NOTHING`,
     [key, String(dish), JSON.stringify(recipe), userId ?? null],
   );
+}
+
+// ──────────────────────────────────── activity + review (per plan) ──
+
+/// The stored activity suggestions for a plan + scope, or undefined on a miss.
+/// Filtered by userId so a user only ever reads their own plan's cache.
+export async function getStoredActivity(userId, planId, scope) {
+  if (!planId) return undefined;
+  const { rows } = await pool.query(
+    'SELECT activity FROM activity_suggestions WHERE plan_id = $1 AND user_id = $2 AND scope = $3',
+    [planId, userId, scope],
+  );
+  return rows[0]?.activity;
+}
+
+/// Stores (or replaces) the activity suggestions for a plan + scope. Swallows a
+/// foreign-key violation (plan not synced to the server yet) so caching can
+/// never fail the generate request.
+export async function saveActivity(userId, planId, scope, activity) {
+  if (!planId) return;
+  try {
+    await pool.query(
+      `INSERT INTO activity_suggestions (plan_id, user_id, scope, activity, updated_at)
+         VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (plan_id, scope)
+         DO UPDATE SET activity = EXCLUDED.activity, user_id = EXCLUDED.user_id, updated_at = now()`,
+      [planId, userId, scope, JSON.stringify(activity)],
+    );
+  } catch (err) {
+    if (err.code === '23503') return; // FK violation — plan not synced yet
+    throw err;
+  }
+}
+
+/// The stored progress review for a plan, or undefined on a miss.
+export async function getStoredReview(userId, planId) {
+  if (!planId) return undefined;
+  const { rows } = await pool.query(
+    'SELECT review FROM review_snapshots WHERE plan_id = $1 AND user_id = $2',
+    [planId, userId],
+  );
+  return rows[0]?.review;
+}
+
+/// Stores (or replaces) the progress review for a plan. Same FK-safe guard.
+export async function saveReview(userId, planId, review) {
+  if (!planId) return;
+  try {
+    await pool.query(
+      `INSERT INTO review_snapshots (plan_id, user_id, review, updated_at)
+         VALUES ($1, $2, $3, now())
+       ON CONFLICT (plan_id)
+         DO UPDATE SET review = EXCLUDED.review, user_id = EXCLUDED.user_id, updated_at = now()`,
+      [planId, userId, JSON.stringify(review)],
+    );
+  } catch (err) {
+    if (err.code === '23503') return; // FK violation — plan not synced yet
+    throw err;
+  }
 }
 
 export default pool;

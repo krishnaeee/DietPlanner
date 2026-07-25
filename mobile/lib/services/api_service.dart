@@ -282,4 +282,57 @@ class ApiService {
     }
     throw ApiException(message);
   }
+
+  /// Reads the last stored review for a plan without generating a new one.
+  /// Returns null when none has been generated yet. Free (auth only).
+  static Future<Review?> getStoredReview(String planId) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/review?planId=$planId');
+    final token = AuthService.instance.token;
+    http.Response resp;
+    try {
+      resp = await http.get(
+        uri,
+        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 20));
+    } catch (e) {
+      throw ApiException('Could not reach the server. ($e)');
+    }
+    if (resp.statusCode == 200) {
+      final b = jsonDecode(resp.body) as Map<String, dynamic>;
+      final r = b['review'];
+      return r is Map<String, dynamic> ? Review.fromJson(r) : null;
+    }
+    if (resp.statusCode == 401) {
+      await AuthService.instance.logout();
+      throw ApiException('Your session expired. Please log in again.');
+    }
+    throw ApiException('Could not load your review (HTTP ${resp.statusCode}).');
+  }
+
+  /// Reads the last stored activity suggestions for a plan + scope without
+  /// generating. Returns null when none exist yet. Free (auth only).
+  static Future<ActivityPlan?> getStoredActivity(String planId, String scope) async {
+    final uri = Uri.parse(
+        '${AppConfig.apiBaseUrl}/api/activity?planId=$planId&scope=$scope');
+    final token = AuthService.instance.token;
+    http.Response resp;
+    try {
+      resp = await http.get(
+        uri,
+        headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 20));
+    } catch (e) {
+      throw ApiException('Could not reach the server. ($e)');
+    }
+    if (resp.statusCode == 200) {
+      final b = jsonDecode(resp.body) as Map<String, dynamic>;
+      final a = b['activity'];
+      return a is Map<String, dynamic> ? ActivityPlan.fromJson(a) : null;
+    }
+    if (resp.statusCode == 401) {
+      await AuthService.instance.logout();
+      throw ApiException('Your session expired. Please log in again.');
+    }
+    throw ApiException('Could not load your activity (HTTP ${resp.statusCode}).');
+  }
 }

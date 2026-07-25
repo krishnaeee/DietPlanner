@@ -246,15 +246,27 @@ export const RECIPE_SCHEMA = {
   required: ['dish', 'servings', 'prepMinutes', 'steps', 'tips'],
 };
 
-// Structured activity suggestions — for one day or a week.
+// Structured activity suggestions — for one day or a week. Detailed enough to
+// actually DO: each session carries ordered how-to steps, one key form cue,
+// equipment, and why it helps; the plan carries a shared warm-up, a progression
+// rule, and concrete safety guardrails.
 export const ACTIVITY_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    headline: { type: 'string', description: 'One encouraging sentence framing the suggestions.' },
+    headline: {
+      type: 'string',
+      description:
+        'One encouraging, specific sentence framing the day or week (for a week, it may name the structure/theme).',
+    },
+    warmup: {
+      type: 'string',
+      description:
+        'ONE shared warm-up AND cool-down routine every session uses, stated once here (so per-session steps never repeat it). Include both the "before" warm-up and the "after" cool-down.',
+    },
     activities: {
       type: 'array',
-      description: 'The suggested activities, in order.',
+      description: 'The suggested sessions, in order.',
       items: {
         type: 'object',
         additionalProperties: false,
@@ -263,18 +275,62 @@ export const ACTIVITY_SCHEMA = {
             type: 'string',
             description: 'Weekday label for a week plan (e.g. "Mon"); empty string for a single-day request.',
           },
-          name: { type: 'string', description: 'The activity, e.g. "Brisk walk".' },
-          minutes: { type: 'integer', description: 'Suggested duration in minutes.' },
-          intensity: { type: 'string', enum: ['light', 'moderate', 'vigorous'] },
-          calories: { type: 'integer', description: 'Approx calories burned (kcal).' },
-          note: { type: 'string', description: 'A short how/why note.' },
+          name: {
+            type: 'string',
+            description:
+              'The concrete session name, e.g. "Full-body dumbbell circuit", "Zone-2 brisk walk", "Active recovery + mobility". A real name, not a category word.',
+          },
+          focus: {
+            type: 'string',
+            description:
+              'One short line naming what the session trains AND why it serves the goal, e.g. "Glutes, quads, core — builds calorie-burning muscle". Must not restate the name.',
+          },
+          minutes: {
+            type: 'integer',
+            description: 'Total session duration in minutes, warm-up and cool-down included.',
+          },
+          intensity: {
+            type: 'string',
+            enum: ['light', 'moderate', 'vigorous'],
+            description: "Overall effort; must match the person's fitness level and agree with calories/minutes.",
+          },
+          calories: { type: 'integer', description: 'Approx calories burned for this session (kcal).' },
+          equipment: {
+            type: 'string',
+            description:
+              'Concrete kit needed before starting, one line; use the explicit "None — bodyweight only" when there is none. Never blank or vague.',
+          },
+          howTo: {
+            type: 'array',
+            description:
+              'THE "how to do it": 3-6 ordered, imperative steps, each carrying a concrete parameter (sets x reps, interval, distance, pace, or tempo). The last step is a short cool-down. Do NOT repeat the shared warm-up. On a rest day, give 2-3 gentle recovery lines.',
+            items: { type: 'string' },
+          },
+          formCue: {
+            type: 'string',
+            description:
+              'The single most important technique/safety cue for this session (<=15 words). Empty string allowed on a pure rest day. Must differ from the name and from every howTo step.',
+          },
         },
-        required: ['day', 'name', 'minutes', 'intensity', 'calories', 'note'],
+        required: ['day', 'name', 'focus', 'minutes', 'intensity', 'calories', 'equipment', 'howTo', 'formCue'],
       },
     },
-    tip: { type: 'string', description: 'One overall safety or consistency tip.' },
+    progression: {
+      type: 'string',
+      description: 'The concrete "when and how to make it harder" rule. Forward guidance, not a recap.',
+    },
+    safety: {
+      type: 'string',
+      description:
+        'Plan-wide stop-signs (e.g. chest pain, dizziness, sharp joint pain) plus a recovery/rest rule, stated once.',
+    },
+    tip: {
+      type: 'string',
+      description:
+        'One practical adherence/scheduling nudge — how to fit this into a real week. Distinct from safety and progression.',
+    },
   },
-  required: ['headline', 'activities', 'tip'],
+  required: ['headline', 'warmup', 'activities', 'progression', 'safety', 'tip'],
 };
 
 // Prompts for activity suggestions. Advice only — these are NOT fed back into
@@ -284,10 +340,11 @@ export function buildActivityPrompt(input) {
   const forWeek = scope === 'week';
 
   const system =
-    'You are a supportive, safety-conscious fitness coach. You suggest realistic, ' +
-    'achievable activities tailored to the person\'s goal and current fitness level, ' +
-    'always beginner-friendly unless they are clearly advanced, and you never push ' +
-    'unsafe intensity. You return ONLY the structured suggestions requested.';
+    'You are a supportive, safety-conscious strength & conditioning coach. You design ' +
+    'realistic, achievable sessions tailored to the person\'s goal and current fitness ' +
+    'level — always beginner-friendly unless they are clearly advanced — and you never ' +
+    'push unsafe intensity. Every session must be executable: a beginner can read it and ' +
+    'actually DO it. You return ONLY the structured suggestions requested.';
 
   const who = [
     goal ? `Goal: ${goal} weight.` : null,
@@ -299,27 +356,33 @@ export function buildActivityPrompt(input) {
     .filter(Boolean)
     .join(' ');
 
+  const rules = `Rules:
+- "focus": name what the session trains (muscles / energy system) AND why it serves the goal, in one line. Never restate the name.
+- "howTo": 3 to 6 ordered, imperative steps. EVERY step carries a concrete parameter — sets x reps, interval structure, distance, pace, or tempo (e.g. "Squats: 3 x 12, rest 60s"). Ban vague steps like "do some cardio" or "stretch a bit". The last step is a short cool-down. Do NOT repeat the shared warm-up.
+- "formCue": the single most important technique/safety correction for that session, <=15 words. Must differ from the name and from every howTo step.
+- "equipment": concrete kit, or the explicit "None — bodyweight only". Never blank.
+- Intensity must match their fitness level (beginner-friendly unless clearly advanced) and agree with calories/minutes.
+- Write the shared warm-up AND cool-down ONCE in the top-level "warmup".
+- "progression": how and when to make it harder. "safety": concrete stop-signs plus a recovery rule. "tip": one scheduling/adherence nudge (distinct from safety and progression).`;
+
   const user = forWeek
-    ? `Suggest a balanced 7-day activity plan.
+    ? `Design a balanced, detailed 7-day activity plan.
 ${who}
-Requirements:
 - Exactly 7 entries, one per weekday, each labelled in "day" (Mon..Sun).
-- Include 1-2 rest or gentle active-recovery days.
-- Match the intensity to their fitness level; keep it safe and sustainable.
-- Give a realistic duration and an approximate calorie burn for each.
-- Add one overall tip (warm-up, consistency, or safety).`
-    : `Suggest 2 to 4 activities for ONE day.
+- Include 1-2 real but light rest / active-recovery days (2-3 gentle recovery lines in howTo, empty formCue).
+${rules}`
+    : `Design 2 to 4 detailed activities for ONE day.
 ${who}
-Requirements:
 - Leave "day" empty for each (this is a single day).
-- Match the intensity to their fitness level; keep it safe and beginner-friendly.
-- Give a realistic duration and an approximate calorie burn for each.
-- Add one overall tip (warm-up, consistency, or safety).`;
+${rules}`;
 
   return { system, user };
 }
 
-// Structured progress review — a written assessment of how the user is doing.
+// Structured progress review — a detailed written assessment of how the user is
+// doing: a status, a narrative summary, a block of concrete metric read-outs
+// derived from their own figures, what's going well, what to fix, a concrete
+// action plan, and a hedged outlook.
 export const REVIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -336,20 +399,61 @@ export const REVIEW_SCHEMA = {
     summary: {
       type: 'string',
       description:
-        "2-4 sentences referencing the person's ACTUAL numbers (weight change and adherence).",
+        "2-4 sentences that interpret the person's ACTUAL weight change and adherence into a story. Do not just re-list the raw numbers already shown in metrics; state no number that was not supplied.",
+    },
+    metrics: {
+      type: 'array',
+      description: '3-5 concrete read-outs, each derived ONLY from the supplied/pre-computed figures.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          label: {
+            type: 'string',
+            description: 'Metric name, e.g. "Pace", "Goal progress", "Projected finish", "Meal adherence", "Off-plan extras".',
+          },
+          value: {
+            type: 'string',
+            description:
+              'The figure, drawn ONLY from supplied/pre-computed inputs — e.g. "0.6 kg/week", "40% (2.0 of 5.0 kg)", "82% (46/56 meals)". Use the literal "Not enough data yet" when it cannot be computed.',
+          },
+          read: {
+            type: 'string',
+            description:
+              'One-line interpretation that ADDS meaning (a band or comparison), e.g. "inside the safe 0.5-1 kg/week zone". Must not echo the value.',
+          },
+          trend: {
+            type: 'string',
+            enum: ['good', 'watch', 'off'],
+            description: 'Colors the row: good=on track, watch=keep an eye, off=needs attention.',
+          },
+        },
+        required: ['label', 'value', 'read', 'trend'],
+      },
     },
     doingWell: {
       type: 'array',
-      description: '1-3 short, specific things they are doing well.',
+      description: '0-3 specific strengths grounded in the real data. May be empty if genuinely too early.',
       items: { type: 'string' },
     },
     improve: {
       type: 'array',
-      description: '1-3 short, specific, actionable suggestions.',
+      description: '0-3 short diagnoses — what is off and why (an observation, not a fix).',
       items: { type: 'string' },
     },
+    actionPlan: {
+      type: 'array',
+      description:
+        '2-4 concrete, time-boxed next actions (imperative, with a specific target). Must not restate an improve item.',
+      items: { type: 'string' },
+    },
+    outlook: {
+      type: 'string',
+      description:
+        "A hedged forward trajectory, explicitly an estimate with its assumption stated. If fewer than two weigh-ins or very early, say it is too soon to project and focus on habits. For status too_fast, carry a health-caution line, not a rosy projection.",
+    },
   },
-  required: ['headline', 'status', 'summary', 'doingWell', 'improve'],
+  required: ['headline', 'status', 'summary', 'metrics', 'doingWell', 'improve', 'actionPlan', 'outlook'],
 };
 
 // Prompts for a progress review. The caller passes already-computed figures
@@ -398,7 +502,61 @@ export function buildReviewPrompt(input) {
     ? `Also logged ${extrasCount} off-plan item(s) totalling ~${extrasCalories} kcal.`
     : 'No off-plan extras logged.';
 
-  const user = `Review this person's progress toward their goal.
+  // Pre-compute the risky derived figures here so the model only PHRASES them
+  // and never does error-prone math (or invents numbers). Same defensive pattern
+  // already used for the adherence % above.
+  const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+  const round1 = (v) => Math.round(v * 10) / 10;
+  const weeksElapsed = daysElapsed > 0 ? daysElapsed / 7 : 0;
+  const enoughForPace = weighIns.length >= 2 && daysElapsed >= 5;
+
+  const computed = [];
+  let changeKg = null; // + = weight down
+  if (isNum(startWeightKg) && isNum(currentWeightKg)) {
+    changeKg = round1(startWeightKg - currentWeightKg);
+    const dir = changeKg > 0 ? 'down' : changeKg < 0 ? 'up' : 'unchanged';
+    computed.push(`Weight change: ${Math.abs(changeKg)} kg ${dir} (from ${startWeightKg} to ${currentWeightKg} kg).`);
+  }
+  let paceKgWk = null;
+  if (enoughForPace && changeKg !== null && weeksElapsed > 0) {
+    paceKgWk = round1(Math.abs(changeKg) / weeksElapsed);
+    computed.push(
+      `Observed pace: about ${paceKgWk} kg/week ${changeKg >= 0 ? 'lost' : 'gained'} over ${daysElapsed} days.`,
+    );
+  } else {
+    computed.push('Observed pace: Not enough data yet (need two weigh-ins a few days apart).');
+  }
+  if (
+    goal !== 'maintain' &&
+    isNum(startWeightKg) &&
+    isNum(targetWeightKg) &&
+    isNum(currentWeightKg) &&
+    startWeightKg !== targetWeightKg
+  ) {
+    const toGo = startWeightKg - targetWeightKg; // signed toward goal
+    const done = startWeightKg - currentWeightKg;
+    const pct = Math.round((done / toGo) * 100);
+    computed.push(
+      `Goal progress: ${pct}% of the way (${round1(Math.abs(done))} of ${round1(Math.abs(toGo))} kg toward ${targetWeightKg} kg).`,
+    );
+    if (paceKgWk && paceKgWk > 0 && Math.sign(done) === Math.sign(toGo)) {
+      const remaining = Math.abs(currentWeightKg - targetWeightKg);
+      const weeksLeft = remaining / paceKgWk;
+      const projDay = Math.round(daysElapsed + weeksLeft * 7);
+      computed.push(
+        `Projected finish (ESTIMATE, only if pace holds): about ${Math.round(weeksLeft)} more week(s), around day ${projDay} of ${targetDays}.`,
+      );
+    }
+  }
+  if (extrasCount > 0 && daysElapsed > 0) {
+    computed.push(
+      `Off-plan extras: ~${Math.round(extrasCalories / daysElapsed)} kcal/day on average (${extrasCount} item(s), ~${extrasCalories} kcal total).`,
+    );
+  }
+
+  const computedBlock = `Pre-computed figures — use THESE, do not recompute or invent others:\n- ${computed.join('\n- ')}`;
+
+  const user = `Review this person's progress toward their goal, in detail.
 ${goalLine}, over ${targetDays} days.
 Daily calorie target: ${calorieTarget || 'unknown'} kcal.
 This is day ${daysElapsed} of ${targetDays}.${currentWeightKg ? `\nCurrent weight: ${currentWeightKg} kg.` : ''}
@@ -406,7 +564,17 @@ ${trend}
 ${adherence}
 ${extras}
 
-Write: a warm one-line headline; the overall status; a 2-4 sentence review that references their real weight change and adherence; 1-3 things they are doing well; and 1-3 specific, actionable improvements.`;
+${computedBlock}
+
+Write a detailed review:
+- a warm one-line headline and the overall status;
+- a 2-4 sentence summary that interprets the real weight change and adherence (don't just re-list the numbers);
+- 3-5 "metrics", each { label, value, read, trend }. "value" comes ONLY from the figures above (or "Not enough data yet"); "read" adds meaning (a safe-range band or comparison), never a repeat of value; "trend" is good/watch/off. Good candidates: Pace, Goal progress, Projected finish, Meal adherence, Off-plan extras.
+- 1-3 "doingWell" (grounded positives) and 1-3 "improve" (what's off and why — a diagnosis, not a fix);
+- 2-4 "actionPlan" items: concrete, time-boxed next actions (imperative, specific target) — must not restate an improve item;
+- an "outlook": the hedged forward trajectory, explicitly an estimate. Any projected date/weight must carry "est." / "if pace holds". If there are fewer than two weigh-ins or it's very early, say it's too soon to project and focus on habits. If status is too_fast, give a health-caution line instead of a rosy projection.
+
+Never invent a number, weigh-in, %, rate, or date. Present-state read-outs (adherence, % done, observed pace) are stated plainly; every extrapolation (projected finish, extras to kg) must be hedged.`;
 
   return { system, user };
 }

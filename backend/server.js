@@ -11,7 +11,8 @@ import { billingRouter, stripeWebhookHandler } from './billingRoutes.js';
 import { plansRouter } from './plansRoutes.js';
 import {
   getEntitlements, spendCredits, addCredits, applyRetarget,
-  getRecipe, saveRecipe, pool,
+  getRecipe, saveRecipe,
+  getStoredActivity, saveActivity, getStoredReview, saveReview, pool,
 } from './db.js';
 import { decideRetarget } from './retarget.js';
 import { BILLING_PROVIDER, CURRENCY } from './billing.js';
@@ -411,9 +412,24 @@ app.post('/api/recipe', requireAuth, async (req, res) => {
 // (weigh-ins, adherence, days elapsed) into a written assessment. FREE (auth
 // only), like a meal swap: it refines engagement with an already-paid plan and
 // we want people using it often. The client sends already-computed numbers.
+// Read the last stored review for a plan (no generation, no LLM). Returns
+// { review: null } on a miss so the client shows its first-run state.
+app.get('/api/review', requireAuth, async (req, res) => {
+  const planId = typeof req.query.planId === 'string' ? req.query.planId : '';
+  if (!planId) return res.status(400).json({ error: 'planId is required' });
+  try {
+    const review = await getStoredReview(req.user.id, planId);
+    res.json({ review: review ?? null });
+  } catch (err) {
+    console.error(`[review:get] → 500: ${err?.message}`);
+    res.status(500).json({ error: 'Failed to load your review.' });
+  }
+});
+
 app.post('/api/review', requireAuth, async (req, res) => {
   const b = req.body || {};
   const num = (v) => (typeof v === 'number' && isFinite(v) ? v : Number(v) || 0);
+  const planId = typeof b.planId === 'string' ? b.planId : '';
   const input = {
     goal: ['lose', 'gain', 'maintain'].includes(b.goal) ? b.goal : 'maintain',
     startWeightKg: num(b.startWeightKg),
@@ -433,6 +449,7 @@ app.post('/api/review', requireAuth, async (req, res) => {
   };
   try {
     const review = await generateReview(input);
+    if (planId) await saveReview(req.user.id, planId, review); // persist for re-opens
     res.json({ review });
   } catch (err) {
     const status = err.status || 500;
@@ -443,11 +460,28 @@ app.post('/api/review', requireAuth, async (req, res) => {
 
 // Activity suggestions for a day or a week. FREE (auth only), like the review —
 // advice that supports an already-paid plan. NOT fed into the calorie math.
+// Read the last stored activity suggestions for a plan + scope (no generation).
+// Returns { activity: null } on a miss.
+app.get('/api/activity', requireAuth, async (req, res) => {
+  const planId = typeof req.query.planId === 'string' ? req.query.planId : '';
+  const scope = req.query.scope === 'week' ? 'week' : 'day';
+  if (!planId) return res.status(400).json({ error: 'planId is required' });
+  try {
+    const activity = await getStoredActivity(req.user.id, planId, scope);
+    res.json({ activity: activity ?? null });
+  } catch (err) {
+    console.error(`[activity:get] → 500: ${err?.message}`);
+    res.status(500).json({ error: 'Failed to load your activity.' });
+  }
+});
+
 app.post('/api/activity', requireAuth, async (req, res) => {
   const b = req.body || {};
   const num = (v) => (typeof v === 'number' && isFinite(v) ? v : Number(v) || 0);
+  const planId = typeof b.planId === 'string' ? b.planId : '';
+  const scope = b.scope === 'week' ? 'week' : 'day';
   const input = {
-    scope: b.scope === 'week' ? 'week' : 'day',
+    scope,
     goal: ['lose', 'gain', 'maintain'].includes(b.goal) ? b.goal : 'maintain',
     sex: SEXES.includes(b.sex) ? b.sex : undefined,
     age: b.age != null && num(b.age) > 0 ? Math.round(num(b.age)) : undefined,
@@ -456,6 +490,7 @@ app.post('/api/activity', requireAuth, async (req, res) => {
   };
   try {
     const activity = await generateActivity(input);
+    if (planId) await saveActivity(req.user.id, planId, scope, activity); // persist for re-opens
     res.json({ activity });
   } catch (err) {
     const status = err.status || 500;

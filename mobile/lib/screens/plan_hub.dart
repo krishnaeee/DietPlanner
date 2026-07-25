@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../services/plan_storage.dart';
 import '../theme/app_theme.dart';
+import 'activity_screen.dart';
 import 'plan_screen.dart';
 import 'progress_screen.dart';
 import 'today_screen.dart';
 
 /// A single plan opened from the Plans list: its own floating dock for Today,
-/// the day-by-day Plan, and Progress. Back (in any tab's header) returns to
-/// the Plans list.
+/// the day-by-day Plan, Progress, and Activity. Back (in any tab's header)
+/// returns to the Plans list.
 class PlanHub extends StatefulWidget {
   final StoredPlan stored;
   const PlanHub({super.key, required this.stored});
@@ -31,7 +32,8 @@ class _PlanHubState extends State<PlanHub> {
         children: [
           TodayScreen(plan: sp),
           PlanScreen(stored: sp, location: sp.location, embedded: true),
-          ProgressScreen(stored: sp),
+          ProgressScreen(stored: sp, embedded: true),
+          ActivityScreen(stored: sp, embedded: true),
         ],
       ),
       bottomNavigationBar: _Dock(
@@ -52,6 +54,7 @@ class _Dock extends StatelessWidget {
     (icon: Icons.today_rounded, label: 'Today'),
     (icon: Icons.restaurant_menu_rounded, label: 'Plan'),
     (icon: Icons.insights_rounded, label: 'Progress'),
+    (icon: Icons.directions_run_rounded, label: 'Activity'),
   ];
 
   @override
@@ -114,7 +117,9 @@ class _DockItem extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(99),
       child: SizedBox(
-        width: 74,
+        // Four tabs now share the dock — keep each item narrow enough that the
+        // pill fits comfortably on smaller phones.
+        width: 66,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 7),
           child: Column(

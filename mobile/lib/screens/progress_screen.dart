@@ -3,9 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/activity.dart';
 import '../models/tracking.dart';
-import '../services/api_service.dart';
 import '../services/notification_service.dart';
 import '../services/plan_storage.dart';
 import '../services/tracking_storage.dart';
@@ -31,10 +29,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
   PlanTracking _t = PlanTracking();
   bool _loading = true;
   bool _busy = false;
-
-  ActivityPlan? _activity;
-  bool _activityBusy = false;
-  String _activityScope = 'day'; // day | week
 
   StoredPlan get _sp => widget.stored;
 
@@ -65,43 +59,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
   Future<void> _persist(PlanTracking next) async {
     setState(() => _t = next);
     await TrackingStorage.save(_sp.id, next);
-  }
-
-  /// Asks the model for activity suggestions for a day or a week. Free.
-  Future<void> _suggestActivity(String scope) async {
-    if (_activityBusy) return;
-    final messenger = ScaffoldMessenger.of(context);
-    final req = _sp.request;
-    final goal = (req?['goal'] ?? '').toString();
-    final body = <String, dynamic>{
-      'scope': scope,
-      'goal': goal.isNotEmpty ? goal : 'maintain',
-      'sex': req?['sex'],
-      'age': req?['age'],
-      'activityLevel': req?['activityLevel'],
-      'weightKg': _t.latestWeight ?? _sp.startWeightKg,
-    };
-    setState(() {
-      _activityScope = scope;
-      _activityBusy = true;
-    });
-    try {
-      final plan = await ApiService.getActivity(body);
-      if (!mounted) return;
-      setState(() {
-        _activity = plan;
-        _activityBusy = false;
-      });
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _activityBusy = false);
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _activityBusy = false);
-      messenger.showSnackBar(const SnackBar(
-          content: Text("Couldn't get activity suggestions. Please try again.")));
-    }
   }
 
   // ─────────────────────────────────────────────────────────── weight ──
@@ -175,7 +132,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
               FreshHeader(
                 title: 'Your progress',
                 subtitle: name.isEmpty ? null : name,
-                showBack: !widget.embedded,
+                showBack: true,
               ),
               Expanded(
                 child: _loading
@@ -190,13 +147,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
                             stored: _sp,
                             tracking: _t,
                             onLog: _logWeight,
-                          ),
-                          const SizedBox(height: 14),
-                          _ActivitySection(
-                            plan: _activity,
-                            scope: _activityScope,
-                            busy: _activityBusy,
-                            onSuggest: _suggestActivity,
                           ),
                           const SizedBox(height: 14),
                           Row(
@@ -260,218 +210,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
                 ),
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-
-/// "Suggest activity" with a Today / This week toggle, and the result once it
-/// arrives. Activity is advice only — it doesn't change the calorie target.
-class _ActivitySection extends StatelessWidget {
-  final ActivityPlan? plan;
-  final String scope; // day | week
-  final bool busy;
-  final void Function(String scope) onSuggest;
-  const _ActivitySection({
-    required this.plan,
-    required this.scope,
-    required this.busy,
-    required this.onSuggest,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: AppColors.line),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.directions_run_rounded, size: 16, color: AppColors.brand),
-              const SizedBox(width: 8),
-              Text('MOVE MORE',
-                  style: text.labelSmall?.copyWith(
-                      color: AppColors.inkFaint,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.0,
-                      fontSize: 9)),
-              const Spacer(),
-              _ScopeToggle(
-                scope: scope,
-                enabled: !busy,
-                onPick: onSuggest,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (busy)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Center(
-                child: SizedBox(
-                    width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-            )
-          else if (plan == null)
-            Text(
-              'Get exercise ideas tailored to your goal — pick a day or a whole week. Free, anytime.',
-              style: text.bodyMedium?.copyWith(color: AppColors.inkMuted, height: 1.5),
-            )
-          else ...[
-            if (plan!.headline.isNotEmpty)
-              Text(plan!.headline,
-                  style: text.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800, height: 1.3)),
-            const SizedBox(height: 10),
-            ...plan!.activities.map((a) => _ActivityRow(a: a)),
-            if (plan!.tip.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.lightbulb_outline_rounded,
-                      size: 15, color: AppColors.accent),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(plan!.tip,
-                        style: text.bodySmall?.copyWith(
-                            color: AppColors.inkMuted, height: 1.4)),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ScopeToggle extends StatelessWidget {
-  final String scope;
-  final bool enabled;
-  final void Function(String scope) onPick;
-  const _ScopeToggle(
-      {required this.scope, required this.enabled, required this.onPick});
-
-  @override
-  Widget build(BuildContext context) {
-    Widget seg(String value, String label) {
-      final sel = scope == value;
-      return GestureDetector(
-        // opaque + vertical padding expands the tap area to ~44dp while the
-        // visible pill stays compact (the hitSlop pattern for a small control).
-        behavior: HitTestBehavior.opaque,
-        onTap: enabled ? () => onPick(value) : null,
-        // Dim the whole control while busy so it reads as non-interactive.
-        child: Opacity(
-          opacity: enabled ? 1 : 0.45,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: sel ? AppColors.brand : Colors.transparent,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(label,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
-                    color: sel ? Colors.white : AppColors.inkMuted,
-                  )),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: AppColors.fieldFill,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.line),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        seg('day', 'Today'),
-        seg('week', 'This week'),
-      ]),
-    );
-  }
-}
-
-class _ActivityRow extends StatelessWidget {
-  final ActivitySuggestion a;
-  const _ActivityRow({required this.a});
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final meta = [
-      if (a.minutes > 0) '${a.minutes} min',
-      a.intensity,
-      if (a.calories > 0) '~${a.calories} kcal',
-    ].join(' · ');
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (a.day.isNotEmpty) ...[
-            Container(
-              width: 38,
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppColors.brand.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(a.day.toUpperCase(),
-                  style: text.labelSmall?.copyWith(
-                      color: AppColors.brand,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 9.5)),
-            ),
-            const SizedBox(width: 10),
-          ] else ...[
-            Container(
-              width: 6,
-              height: 6,
-              margin: const EdgeInsets.only(top: 6),
-              decoration:
-                  const BoxDecoration(color: AppColors.brand, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(a.name,
-                    style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
-                if (meta.isNotEmpty)
-                  Text(meta,
-                      style: text.bodySmall?.copyWith(
-                          color: AppColors.inkMuted, fontWeight: FontWeight.w600)),
-                if (a.note.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(a.note,
-                      style: text.bodySmall?.copyWith(
-                          color: AppColors.inkFaint, height: 1.4)),
-                ],
-              ],
-            ),
-          ),
         ],
       ),
     );
