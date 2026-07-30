@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -73,7 +74,9 @@ class NotificationService {
       // Detection failed — leave tz.local as UTC; times may be off by the offset.
     }
 
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    // Monochrome small icon (white silhouette) — a full-colour launcher icon
+    // renders as a plain white square in the status bar.
+    const android = AndroidInitializationSettings('@drawable/ic_stat_notify');
     const darwin = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -378,6 +381,11 @@ class NotificationService {
         channelDescription: water ? _waterChannelDesc : _channelDesc,
         importance: Importance.high,
         priority: Priority.high,
+        // White monochrome silhouette in the status bar; the full-colour logo
+        // shows as the large icon; coral accent tint in the expanded view.
+        icon: '@drawable/ic_stat_notify',
+        color: const Color(0xFFFF5D6D),
+        largeIcon: const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
         styleInformation: bigText != null ? BigTextStyleInformation(bigText) : null,
       ),
       iOS: const DarwinNotificationDetails(),

@@ -705,15 +705,18 @@ export async function saveRecipe(dish, recipe, userId) {
 
 // ──────────────────────────────────── activity + review (per plan) ──
 
-/// The stored activity suggestions for a plan + scope, or undefined on a miss.
-/// Filtered by userId so a user only ever reads their own plan's cache.
+/// The stored activity suggestions for a plan + scope as
+/// { activity, updatedAt } (ISO string), or undefined on a miss. Filtered by
+/// userId so a user only ever reads their own plan's cache.
 export async function getStoredActivity(userId, planId, scope) {
   if (!planId) return undefined;
   const { rows } = await pool.query(
-    'SELECT activity FROM activity_suggestions WHERE plan_id = $1 AND user_id = $2 AND scope = $3',
+    "SELECT activity, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at " +
+      'FROM activity_suggestions WHERE plan_id = $1 AND user_id = $2 AND scope = $3',
     [planId, userId, scope],
   );
-  return rows[0]?.activity;
+  if (!rows[0]) return undefined;
+  return { activity: rows[0].activity, updatedAt: rows[0].updated_at };
 }
 
 /// Stores (or replaces) the activity suggestions for a plan + scope. Swallows a
@@ -735,14 +738,17 @@ export async function saveActivity(userId, planId, scope, activity) {
   }
 }
 
-/// The stored progress review for a plan, or undefined on a miss.
+/// The stored progress review for a plan as { review, updatedAt } (ISO string),
+/// or undefined on a miss.
 export async function getStoredReview(userId, planId) {
   if (!planId) return undefined;
   const { rows } = await pool.query(
-    'SELECT review FROM review_snapshots WHERE plan_id = $1 AND user_id = $2',
+    "SELECT review, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at " +
+      'FROM review_snapshots WHERE plan_id = $1 AND user_id = $2',
     [planId, userId],
   );
-  return rows[0]?.review;
+  if (!rows[0]) return undefined;
+  return { review: rows[0].review, updatedAt: rows[0].updated_at };
 }
 
 /// Stores (or replaces) the progress review for a plan. Same FK-safe guard.

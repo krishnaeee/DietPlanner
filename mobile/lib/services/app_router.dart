@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../screens/grocery_list_screen.dart';
-import '../screens/plan_screen.dart';
+import '../screens/plan_hub.dart';
 import '../screens/progress_screen.dart';
 import 'plan_storage.dart';
 
@@ -63,12 +63,13 @@ Future<void> routeFromNotification(String payload) async {
     ));
     return;
   }
+  // Meal reminders open the plan's Today tab (not the day-by-day Plan section),
+  // highlighting the meal that's due. Any other tap (comeback, unknown) also
+  // lands on Today.
   nav.push(MaterialPageRoute(
-    builder: (_) => PlanScreen(
+    builder: (_) => PlanHub(
       stored: sp,
-      location: sp.location,
-      initialDay: day,
-      highlightMeal: meal >= 0 ? meal : null,
+      initialHighlightMeal: type == 'meal' && meal >= 0 ? meal : null,
     ),
   ));
 }

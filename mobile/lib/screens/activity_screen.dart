@@ -30,9 +30,13 @@ class _ActivityScreenState extends State<ActivityScreen> {
   // Cached per scope: key absent = not resolved yet, value null = resolved but
   // nothing stored (show the first-run state).
   final Map<String, ActivityPlan?> _cache = {};
+  final Map<String, DateTime?> _updatedAt = {}; // when each scope was generated
   bool _busy = false; // generating a new plan
   bool _resolving = true; // loading the stored plan for the selected scope
   String _scope = 'day'; // day | week
+
+  /// Suggestions auto-refresh once they're older than this.
+  static const _maxAge = Duration(days: 7);
 
   StoredPlan get _sp => widget.stored;
 
@@ -71,15 +75,25 @@ class _ActivityScreenState extends State<ActivityScreen> {
       _scope = scope;
       _resolving = true;
     });
-    ActivityPlan? stored;
+    ({ActivityPlan? activity, DateTime? updatedAt})? stored;
     try {
       stored = await ApiService.getStoredActivity(_sp.id, scope);
     } catch (_) {
       stored = null; // offline / error → fall back to the first-run state
     }
     if (!mounted) return;
+    final plan = stored?.activity;
+    final ts = stored?.updatedAt;
+    final fresh = ts != null && DateTime.now().difference(ts) < _maxAge;
+    // Stored but stale (> 7 days) → regenerate automatically on open.
+    if (plan != null && !fresh) {
+      setState(() => _resolving = false);
+      await _suggest(scope);
+      return;
+    }
     setState(() {
-      _cache[scope] = stored;
+      _cache[scope] = plan;
+      _updatedAt[scope] = ts;
       _resolving = false;
     });
   }
@@ -109,6 +123,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
       if (!mounted) return;
       setState(() {
         _cache[scope] = plan;
+        _updatedAt[scope] = DateTime.now(); // just generated + stored
         _busy = false;
       });
     } on ApiException catch (e) {
@@ -170,6 +185,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                   _ActivityResult(
                     plan: _cache[_scope]!,
                     scope: _scope,
+                    updatedAt: _updatedAt[_scope],
                     onRegenerate: () => _suggest(_scope),
                   ),
               ],
@@ -271,9 +287,13 @@ class _ActivityLoading extends StatelessWidget {
 class _ActivityResult extends StatefulWidget {
   final ActivityPlan plan;
   final String scope; // day | week
+  final DateTime? updatedAt;
   final VoidCallback onRegenerate;
   const _ActivityResult(
-      {required this.plan, required this.scope, required this.onRegenerate});
+      {required this.plan,
+      required this.scope,
+      required this.updatedAt,
+      required this.onRegenerate});
 
   @override
   State<_ActivityResult> createState() => _ActivityResultState();
@@ -327,6 +347,14 @@ class _ActivityResultState extends State<_ActivityResult> {
                 : "Regenerate today's workout"),
           ),
         ),
+        if (widget.updatedAt != null)
+          Center(
+            child: Text(
+              'Generated ${relativeSince(widget.updatedAt!)} · auto-refreshes weekly',
+              style: text.bodySmall
+                  ?.copyWith(color: AppColors.inkFaint, fontSize: 11),
+            ),
+          ),
       ],
     );
   }

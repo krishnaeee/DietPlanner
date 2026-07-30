@@ -457,7 +457,6 @@ class _PlanViewState extends State<_PlanView> {
   late StoredPlan _sp;
   late DietPlan _plan; // grows as the user loads more weeks
   bool _extending = false; // a "load next week" generation is in flight
-  int? _swapping; // meal index (on the selected day) currently being swapped
   PlanTracking _tracking = PlanTracking();
 
   final ScrollController _scroll = ScrollController();
@@ -505,11 +504,31 @@ class _PlanViewState extends State<_PlanView> {
     }
     _loadTracking();
     _maybeShowReminderPrompt();
+    // The tick + swap now live in Meal Detail, so refresh when the user comes
+    // back from there (tracking → done state, plan → a swapped dish).
+    TrackingStorage.revision.addListener(_loadTracking);
+    PlanStorage.revision.addListener(_reloadPlan);
   }
 
   Future<void> _loadTracking() async {
     final t = await TrackingStorage.load(_sp.id);
     if (mounted) setState(() => _tracking = t);
+  }
+
+  /// Reloads the plan from storage (a swap in Meal Detail changes a dish).
+  Future<void> _reloadPlan() async {
+    final all = await PlanStorage.loadAll();
+    for (final p in all) {
+      if (p.id == _sp.id) {
+        if (mounted) {
+          setState(() {
+            _sp = p;
+            _plan = p.plan;
+          });
+        }
+        return;
+      }
+    }
   }
 
   /// Right after a plan is generated, offer to set reminders via a centered
@@ -565,12 +584,6 @@ class _PlanViewState extends State<_PlanView> {
     ));
   }
 
-  Future<void> _toggleMeal(int dayIndex, int mealIndex) async {
-    final next = _tracking.toggleMeal(dayIndex, mealIndex);
-    setState(() => _tracking = next);
-    await TrackingStorage.save(_sp.id, next);
-  }
-
   /// Logs an off-plan item against the day the user is looking at — so an extra
   /// can be added to ANY day, not just today.
   Future<void> _addExtra(int dayIndex) async {
@@ -589,55 +602,6 @@ class _PlanViewState extends State<_PlanView> {
     final next = _tracking.withoutExtra(id);
     setState(() => _tracking = next);
     await TrackingStorage.save(_sp.id, next);
-  }
-
-  /// Regenerates a single meal on the selected day (free on the backend), then
-  /// replaces it in place and persists.
-  Future<void> _swapMeal(int mealIndex) async {
-    if (_swapping != null) return;
-    final dayIndex = _selected;
-    final day = _plan.days[dayIndex];
-    if (mealIndex < 0 || mealIndex >= day.meals.length) return;
-    final meal = day.meals[mealIndex];
-    final messenger = ScaffoldMessenger.of(context);
-    final req = _sp.request;
-    final location =
-        widget.location.trim().isNotEmpty ? widget.location.trim() : '${req?['location'] ?? ''}';
-
-    final body = <String, dynamic>{
-      'location': location,
-      'mealName': meal.name,
-      'time': meal.time,
-      'targetCalories': meal.calories,
-      'avoidDish': meal.dish,
-      if (req?['dietaryPreference'] != null)
-        'dietaryPreference': req!['dietaryPreference'],
-      // A swap must honour allergies as strictly as the original plan did.
-      if (req?['allergies'] is List) 'allergies': req!['allergies'],
-    };
-
-    setState(() => _swapping = mealIndex);
-    try {
-      final fresh = await ApiService.swapMeal(body);
-      final merged = _plan.withReplacedMeal(dayIndex, mealIndex, fresh);
-      await PlanStorage.upsert(_sp.copyWith(plan: merged));
-      if (!mounted) return;
-      setState(() {
-        _plan = merged;
-        _sp = _sp.copyWith(plan: merged);
-        _swapping = null;
-      });
-      messenger.showSnackBar(SnackBar(
-          content: Text(fresh.dish.isEmpty ? 'Meal swapped.' : 'Swapped to ${fresh.dish}.')));
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _swapping = null);
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _swapping = null);
-      messenger.showSnackBar(SnackBar(content: Text('Could not swap meal. $e')));
-    }
   }
 
   void _openProgress() {
@@ -691,6 +655,8 @@ class _PlanViewState extends State<_PlanView> {
 
   @override
   void dispose() {
+    TrackingStorage.revision.removeListener(_loadTracking);
+    PlanStorage.revision.removeListener(_reloadPlan);
     _scroll.dispose();
     super.dispose();
   }
@@ -829,10 +795,6 @@ class _PlanViewState extends State<_PlanView> {
                                 meal: days[selected].meals[m],
                                 highlight: hi,
                                 done: _tracking.isMealDone(selected, m),
-                                swapping: _swapping == m,
-                                swapDisabled: _swapping != null,
-                                onToggle: () => _toggleMeal(selected, m),
-                                onSwap: () => _swapMeal(m),
                                 onTap: () =>
                                     Navigator.of(context).push(MaterialPageRoute(
                                   builder: (_) => MealDetailScreen(
@@ -1291,19 +1253,11 @@ class _PlanMealRow extends StatelessWidget {
   final Meal meal;
   final bool highlight;
   final bool done;
-  final bool swapping;
-  final bool swapDisabled;
-  final VoidCallback onToggle;
-  final VoidCallback onSwap;
   final VoidCallback onTap;
   const _PlanMealRow({
     required this.meal,
     required this.highlight,
     required this.done,
-    required this.swapping,
-    required this.swapDisabled,
-    required this.onToggle,
-    required this.onSwap,
     required this.onTap,
   });
 
@@ -1317,6 +1271,8 @@ class _PlanMealRow extends StatelessWidget {
         ? ' · P${meal.protein} C${meal.carbs} F${meal.fat}'
         : '';
 
+    // The card is now a pure preview: tap opens Meal Detail, where the tick and
+    // swap live. A read-only mint check just shows what's already been eaten.
     return Material(
       color: done ? mint.withValues(alpha: 0.05) : AppColors.surface,
       borderRadius: BorderRadius.circular(18),
@@ -1369,63 +1325,13 @@ class _PlanMealRow extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 6),
-                // swap
-                Material(
-                  color: AppColors.surfaceHigh,
-                  shape: const CircleBorder(),
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: (swapping || swapDisabled) ? null : onSwap,
-                    // 44dp tap area around the 30dp circle; a mis-tapped swap
-                    // costs a regeneration, so the target matters here.
-                    child: SizedBox(
-                      width: 44,
-                      height: 44,
-                      child: Center(
-                        child: SizedBox(
-                          width: 30,
-                          height: 30,
-                          child: swapping
-                              ? const Padding(
-                                  padding: EdgeInsets.all(7),
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : Icon(Icons.autorenew_rounded,
-                                  size: 16,
-                                  color: swapDisabled
-                                      ? AppColors.inkFaint
-                                      : AppColors.brand),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // check
-                GestureDetector(
-                  onTap: onToggle,
-                  behavior: HitTestBehavior.opaque, // 44dp hit area, 28dp visual
-                  child: SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: Center(
-                      child: AnimatedContainer(
-                        duration: motion(context, 160),
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: done ? mint : Colors.transparent,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: done ? mint : AppColors.line, width: 2),
-                        ),
-                        child: Icon(Icons.check_rounded,
-                            size: 16,
-                            color: done ? AppColors.onMint : AppColors.inkFaint),
-                      ),
-                    ),
-                  ),
-                ),
+                const SizedBox(width: 8),
+                if (done) ...[
+                  Icon(Icons.check_circle_rounded, size: 18, color: mint),
+                  const SizedBox(width: 4),
+                ],
+                Icon(Icons.chevron_right_rounded,
+                    size: 20, color: AppColors.inkFaint),
               ],
             ),
           ),

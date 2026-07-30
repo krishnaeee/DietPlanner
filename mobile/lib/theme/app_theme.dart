@@ -150,6 +150,23 @@ Duration motion(BuildContext context, int ms) =>
 /// animations (e.g. a spinner) on this.
 bool reduceMotion(BuildContext context) => MediaQuery.of(context).disableAnimations;
 
+/// A short, human relative-time label ("just now", "3 days ago", "2 weeks
+/// ago") for a past timestamp. Used for "last reviewed / last generated".
+String relativeSince(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+  if (d.inHours < 24) return '${d.inHours}h ago';
+  if (d.inDays == 1) return 'yesterday';
+  if (d.inDays < 7) return '${d.inDays} days ago';
+  if (d.inDays < 30) {
+    final w = (d.inDays / 7).floor();
+    return w <= 1 ? 'a week ago' : '$w weeks ago';
+  }
+  final m = (d.inDays / 30).floor();
+  return m <= 1 ? 'a month ago' : '$m months ago';
+}
+
 class AppTheme {
   AppTheme._();
 

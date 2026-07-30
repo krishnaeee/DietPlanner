@@ -1,0 +1,22 @@
+<!-- Monochrome notification small-icon: the DietME leaf + sparkle as a white,
+     alpha-only silhouette. Android tints status-bar small icons by their alpha,
+     so a full-colour launcher icon renders as a plain white square — this fixes
+     that. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- leaf (lower-left) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M14.5,10 C14.5,17.4 8.9,23 1.5,23 C1.5,15.6 7.1,10 14.5,10 Z" />
+    <!-- large 4-point sparkle (upper-right) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.5,2 L19.7,5.3 L23,6.5 L19.7,7.7 L18.5,11 L17.3,7.7 L14,6.5 L17.3,5.3 Z" />
+    <!-- small sparkle -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M22,11.2 L22.55,12.65 L24,13.2 L22.55,13.75 L22,15.2 L21.45,13.75 L20,13.2 L21.45,12.65 Z" />
+</vector>

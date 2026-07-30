@@ -21,8 +21,12 @@ class ReviewScreen extends StatefulWidget {
 
 class _ReviewScreenState extends State<ReviewScreen> {
   Review? _review;
+  DateTime? _updatedAt; // when the shown review was generated
   bool _loading = true;
   String? _error;
+
+  /// Reviews auto-refresh once they're older than this.
+  static const _maxAge = Duration(days: 7);
 
   StoredPlan get _sp => widget.stored;
   PlanTracking get _t => widget.tracking;
@@ -33,15 +37,19 @@ class _ReviewScreenState extends State<ReviewScreen> {
     _init();
   }
 
-  /// Show the last stored review immediately if one exists; only generate on the
-  /// very first open. "Review again" is the explicit refresh.
+  /// Show the stored review if it's fresh (< 7 days old); regenerate if it's
+  /// stale or missing. "Review again" is the explicit manual refresh.
   Future<void> _init() async {
     try {
       final stored = await ApiService.getStoredReview(_sp.id);
       if (!mounted) return;
-      if (stored != null) {
+      final r = stored.review;
+      final ts = stored.updatedAt;
+      final fresh = ts != null && DateTime.now().difference(ts) < _maxAge;
+      if (r != null && fresh) {
         setState(() {
-          _review = stored;
+          _review = r;
+          _updatedAt = ts;
           _loading = false;
         });
         return;
@@ -87,6 +95,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
       if (!mounted) return;
       setState(() {
         _review = review;
+        _updatedAt = DateTime.now(); // just generated + stored server-side
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -147,6 +156,16 @@ class _ReviewScreenState extends State<ReviewScreen> {
                                 icon: Icons.refresh_rounded,
                                 onPressed: _fetch,
                               ),
+                              if (_updatedAt != null) ...[
+                                const SizedBox(height: 10),
+                                Center(
+                                  child: Text(
+                                    'Last reviewed ${relativeSince(_updatedAt!)} · auto-refreshes weekly',
+                                    style: text.bodySmall?.copyWith(
+                                        color: AppColors.inkFaint, fontSize: 11),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
           ),

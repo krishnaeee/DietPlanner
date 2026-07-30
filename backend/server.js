@@ -466,8 +466,8 @@ app.get('/api/review', requireAuth, async (req, res) => {
   const planId = typeof req.query.planId === 'string' ? req.query.planId : '';
   if (!planId) return res.status(400).json({ error: 'planId is required' });
   try {
-    const review = await getStoredReview(req.user.id, planId);
-    res.json({ review: review ?? null });
+    const row = await getStoredReview(req.user.id, planId);
+    res.json({ review: row?.review ?? null, updatedAt: row?.updatedAt ?? null });
   } catch (err) {
     console.error(`[review:get] → 500: ${err?.message}`);
     res.status(500).json({ error: 'Failed to load your review.' });
@@ -515,8 +515,8 @@ app.get('/api/activity', requireAuth, async (req, res) => {
   const scope = req.query.scope === 'week' ? 'week' : 'day';
   if (!planId) return res.status(400).json({ error: 'planId is required' });
   try {
-    const activity = await getStoredActivity(req.user.id, planId, scope);
-    res.json({ activity: activity ?? null });
+    const row = await getStoredActivity(req.user.id, planId, scope);
+    res.json({ activity: row?.activity ?? null, updatedAt: row?.updatedAt ?? null });
   } catch (err) {
     console.error(`[activity:get] → 500: ${err?.message}`);
     res.status(500).json({ error: 'Failed to load your activity.' });

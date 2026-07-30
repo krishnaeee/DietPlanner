@@ -24,7 +24,11 @@ const _kWeekdaysUp = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 /// an "Up next" meal promoted with a gradient border, and the day's meals.
 class TodayScreen extends StatefulWidget {
   final StoredPlan plan;
-  const TodayScreen({super.key, required this.plan});
+
+  /// A meal index to briefly highlight + scroll to, set when the screen is
+  /// opened from a tapped meal reminder.
+  final int? highlightMeal;
+  const TodayScreen({super.key, required this.plan, this.highlightMeal});
 
   @override
   State<TodayScreen> createState() => _TodayScreenState();
@@ -36,6 +40,11 @@ class _TodayScreenState extends State<TodayScreen> {
 
   /// Whether the "yesterday's unlogged meals" recovery list is expanded.
   bool _recoverOpen = false;
+
+  /// Meal tile to flash + scroll to (from a tapped meal reminder); cleared
+  /// after a moment. [_highlightKey] anchors the ensureVisible scroll.
+  int? _highlightMeal;
+  final GlobalKey _highlightKey = GlobalKey();
 
   /// Days since the last weigh-in, or null if none logged yet.
   int? get _daysSinceWeighIn {
@@ -53,6 +62,20 @@ class _TodayScreenState extends State<TodayScreen> {
     _loadTracking();
     TrackingStorage.revision.addListener(_loadTracking);
     PlanStorage.revision.addListener(_reloadPlan);
+    _highlightMeal = widget.highlightMeal;
+    if (_highlightMeal != null) {
+      // After first layout, scroll the highlighted meal into view, then fade
+      // the highlight out.
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final ctx = _highlightKey.currentContext;
+        if (ctx != null) {
+          await Scrollable.ensureVisible(ctx,
+              duration: motion(context, 400), alignment: 0.3);
+        }
+        await Future<void>.delayed(const Duration(seconds: 3));
+        if (mounted) setState(() => _highlightMeal = null);
+      });
+    }
   }
 
   @override
@@ -285,11 +308,15 @@ class _TodayScreenState extends State<TodayScreen> {
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: RefreshIndicator(
+        child: Stack(
+          children: [
+            RefreshIndicator(
           onRefresh: _reloadPlan,
           color: AppColors.brand,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 96),
+            // Extra bottom room so the last card clears the floating grocery
+            // pill and the hub dock.
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 150),
             children: [
               // ── header
               Row(
@@ -420,15 +447,29 @@ class _TodayScreenState extends State<TodayScreen> {
               _Micro('TODAY · $doneCount OF ${day.meals.length} EATEN'),
               const SizedBox(height: 8),
               ...List.generate(day.meals.length, (m) {
+                final highlighted = _highlightMeal == m;
                 return Padding(
+                  key: highlighted ? _highlightKey : null,
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: FreshMealTile(
-                    meal: day.meals[m],
-                    done: _tracking.isMealDone(ds.index, m),
-                    skipped: _tracking.isMealSkipped(ds.index, m),
-                    onToggle: () => _toggle(ds.index, m),
-                    onSkip: () => _skip(ds.index, m),
-                    onTap: () => _openMeal(ds.index, m),
+                  child: AnimatedContainer(
+                    duration: motion(context, 300),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: highlighted
+                            ? AppColors.brand
+                            : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                    child: FreshMealTile(
+                      meal: day.meals[m],
+                      done: _tracking.isMealDone(ds.index, m),
+                      skipped: _tracking.isMealSkipped(ds.index, m),
+                      onToggle: () => _toggle(ds.index, m),
+                      onSkip: () => _skip(ds.index, m),
+                      onTap: () => _openMeal(ds.index, m),
+                    ),
                   ),
                 );
               }),
@@ -447,23 +488,61 @@ class _TodayScreenState extends State<TodayScreen> {
                     )),
               ],
               AddExtraButton(onTap: () => _addExtra(ds.index)),
-
-              const SizedBox(height: 4),
-              _GroceryShortcut(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => GroceryListScreen(
-                    plan: plan,
-                    startIndex: ds.index,
-                    windowDays: (plan.days.length - ds.index).clamp(1, 7),
-                    startInDayMode: true,
-                  ),
-                )),
-              ),
             ],
           ),
+            ),
+            // ── floating Groceries pill (matches the Plan screen), above the
+            // hub dock.
+            Positioned(
+              right: 18,
+              bottom: 96,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: AppColors.ctaGradient,
+                  borderRadius: BorderRadius.circular(99),
+                  boxShadow: coralGlow(),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(99),
+                    onTap: () => _openGrocery(plan, ds.index),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.shopping_cart_rounded,
+                              color: Colors.white, size: 17),
+                          SizedBox(width: 6),
+                          Text('Groceries',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12.5)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  /// Opens the grocery list for the current day's window.
+  void _openGrocery(DietPlan plan, int dayIndex) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => GroceryListScreen(
+        plan: plan,
+        startIndex: dayIndex,
+        windowDays: (plan.days.length - dayIndex).clamp(1, 7),
+        startInDayMode: true,
+      ),
+    ));
   }
 
   String _greeting() {
@@ -921,41 +1000,3 @@ class _RecoveryCard extends StatelessWidget {
   }
 }
 
-class _GroceryShortcut extends StatelessWidget {
-  final VoidCallback onTap;
-  const _GroceryShortcut({required this.onTap});
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.line),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                const Icon(Icons.shopping_cart_rounded,
-                    color: AppColors.brand, size: 19),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text("Today's groceries",
-                      style: text.bodyMedium?.copyWith(
-                          color: AppColors.ink, fontWeight: FontWeight.w800)),
-                ),
-                Icon(Icons.chevron_right_rounded, color: AppColors.inkFaint),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

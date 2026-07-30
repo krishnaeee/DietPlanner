@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../models/diet_plan.dart';
 import '../models/recipe.dart';
+import '../models/tracking.dart';
 import '../services/api_service.dart';
 import '../services/plan_storage.dart';
 import '../services/recipe_store.dart';
+import '../services/tracking_storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fresh.dart';
 import 'paywall_screen.dart';
@@ -30,6 +32,7 @@ class MealDetailScreen extends StatefulWidget {
 class _MealDetailScreenState extends State<MealDetailScreen> {
   late DietPlan _plan = widget.stored.plan;
   bool _swapping = false;
+  PlanTracking _tracking = PlanTracking();
 
   Recipe? _recipe;
   bool _loadingRecipe = false;
@@ -40,6 +43,27 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
   void initState() {
     super.initState();
     _loadCachedRecipe();
+    _loadTracking();
+  }
+
+  Future<void> _loadTracking() async {
+    final t = await TrackingStorage.load(widget.stored.id);
+    if (mounted) setState(() => _tracking = t);
+  }
+
+  /// Marks the meal eaten (or clears it) — the tick that used to live on the
+  /// plan card. Persists so Today/Plan update via the revision notifier.
+  Future<void> _toggleEaten() async {
+    final next = _tracking.toggleMeal(widget.dayIndex, widget.mealIndex);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(widget.stored.id, next);
+  }
+
+  /// Marks the meal skipped (or clears it).
+  Future<void> _toggleSkipped() async {
+    final next = _tracking.toggleSkip(widget.dayIndex, widget.mealIndex);
+    setState(() => _tracking = next);
+    await TrackingStorage.save(widget.stored.id, next);
   }
 
   /// Show a locally-cached recipe instantly (offline, no round-trip) if we have
@@ -241,6 +265,16 @@ class _MealDetailScreenState extends State<MealDetailScreen> {
                       style: text.bodySmall?.copyWith(
                           color: color, fontWeight: FontWeight.w800)),
                 ],
+
+                // Tick / "didn't eat" — moved here from the plan card.
+                const SizedBox(height: 16),
+                _MealStatusControl(
+                  done: _tracking.isMealDone(widget.dayIndex, widget.mealIndex),
+                  skipped:
+                      _tracking.isMealSkipped(widget.dayIndex, widget.mealIndex),
+                  onEaten: _toggleEaten,
+                  onSkipped: _toggleSkipped,
+                ),
 
                 if (meal.protein > 0 || meal.carbs > 0 || meal.fat > 0) ...[
                   const SizedBox(height: 16),
@@ -509,6 +543,87 @@ class _RecipeView extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// The "eaten / didn't eat" control — two toggle chips. The active one is
+/// filled; tapping it again clears the state. Mirrors the Today tile semantics.
+class _MealStatusControl extends StatelessWidget {
+  final bool done;
+  final bool skipped;
+  final VoidCallback onEaten;
+  final VoidCallback onSkipped;
+  const _MealStatusControl({
+    required this.done,
+    required this.skipped,
+    required this.onEaten,
+    required this.onSkipped,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final mint = MacroColors.protein;
+    final amber = AppColors.accent;
+
+    Widget chip({
+      required bool active,
+      required Color color,
+      required IconData icon,
+      required String label,
+      required VoidCallback onTap,
+    }) {
+      final fg = active ? color : AppColors.inkMuted;
+      return Expanded(
+        child: Material(
+          color: active ? color.withValues(alpha: 0.14) : AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.field),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 46),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadius.field),
+                border: Border.all(
+                    color: active ? color : AppColors.line,
+                    width: active ? 1.5 : 1),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 17, color: fg),
+                  const SizedBox(width: 7),
+                  Text(label,
+                      style: text.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w800, color: fg)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        chip(
+          active: done,
+          color: mint,
+          icon: Icons.check_rounded,
+          label: 'Eaten',
+          onTap: onEaten,
+        ),
+        const SizedBox(width: 10),
+        chip(
+          active: skipped,
+          color: amber,
+          icon: Icons.do_not_disturb_on_rounded,
+          label: "Didn't eat",
+          onTap: onSkipped,
+        ),
+      ],
     );
   }
 }

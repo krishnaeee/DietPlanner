@@ -12,7 +12,10 @@ import 'today_screen.dart';
 /// returns to the Plans list.
 class PlanHub extends StatefulWidget {
   final StoredPlan stored;
-  const PlanHub({super.key, required this.stored});
+
+  /// Meal index to highlight on the Today tab (from a tapped meal reminder).
+  final int? initialHighlightMeal;
+  const PlanHub({super.key, required this.stored, this.initialHighlightMeal});
 
   @override
   State<PlanHub> createState() => _PlanHubState();
@@ -30,7 +33,7 @@ class _PlanHubState extends State<PlanHub> {
       body: IndexedStack(
         index: _index,
         children: [
-          TodayScreen(plan: sp),
+          TodayScreen(plan: sp, highlightMeal: widget.initialHighlightMeal),
           PlanScreen(stored: sp, location: sp.location, embedded: true),
           ProgressScreen(stored: sp, embedded: true),
           ActivityScreen(stored: sp, embedded: true),
