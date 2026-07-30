@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:ui' show Color;
 
-import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb, ValueNotifier;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -74,33 +74,41 @@ class NotificationService {
       // Detection failed — leave tz.local as UTC; times may be off by the offset.
     }
 
-    // Monochrome small icon (white silhouette) — a full-colour launcher icon
-    // renders as a plain white square in the status bar.
-    const android = AndroidInitializationSettings('@drawable/ic_stat_notify');
+    // The DEFAULT small icon is the always-present launcher (so init can never
+    // throw on a missing resource); our own reminders override it with the
+    // monochrome @drawable/ic_stat_notify in _scheduleAt.
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const darwin = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
       requestSoundPermission: false,
     );
-    await _plugin.initialize(
-      settings: const InitializationSettings(android: android, iOS: darwin, macOS: darwin),
-      onDidReceiveNotificationResponse: _onResponse,
-    );
+    // A notification-setup failure must NEVER blank the app at startup — guard
+    // the whole platform init and degrade gracefully (no reminders).
+    try {
+      await _plugin.initialize(
+        settings:
+            const InitializationSettings(android: android, iOS: darwin, macOS: darwin),
+        onDidReceiveNotificationResponse: _onResponse,
+      );
 
-    final androidPlugin = _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-    await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
-      _channelId,
-      _channelName,
-      description: _channelDesc,
-      importance: Importance.high,
-    ));
-    await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
-      _waterChannelId,
-      _waterChannelName,
-      description: _waterChannelDesc,
-      importance: Importance.high,
-    ));
+      final androidPlugin = _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
+        _channelId,
+        _channelName,
+        description: _channelDesc,
+        importance: Importance.high,
+      ));
+      await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
+        _waterChannelId,
+        _waterChannelName,
+        description: _waterChannelDesc,
+        importance: Importance.high,
+      ));
+    } catch (e) {
+      debugPrint('NotificationService.init failed (reminders disabled): $e');
+    }
     _ready = true;
   }
 
@@ -404,17 +412,23 @@ class NotificationService {
         matchDateTimeComponents: match,
       );
     } catch (_) {
-      // Exact-alarm permission not granted → still schedule, just inexact.
-      await _plugin.zonedSchedule(
-        id: id,
-        title: title,
-        body: body,
-        scheduledDate: when,
-        notificationDetails: details,
-        payload: payload,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        matchDateTimeComponents: match,
-      );
+      // Exact-alarm permission not granted → still schedule, just inexact. Guard
+      // this retry too so a scheduling failure (e.g. a bad icon) can never
+      // propagate out of a reschedule and crash startup.
+      try {
+        await _plugin.zonedSchedule(
+          id: id,
+          title: title,
+          body: body,
+          scheduledDate: when,
+          notificationDetails: details,
+          payload: payload,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          matchDateTimeComponents: match,
+        );
+      } catch (e) {
+        debugPrint('NotificationService: could not schedule id=$id: $e');
+      }
     }
   }
 

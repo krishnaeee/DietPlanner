@@ -40,6 +40,14 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Default notification small-icon (monochrome). Also anchors the
+             drawable as manifest-referenced so it is never stripped from the
+             release APK — a Dart-string-only reference is invisible to the
+             resource linker and gets dropped, which shows a blank/no icon. -->
+        <meta-data
+            android:name="com.dexterous.flutterlocalnotifications.default_notification_icon"
+            android:resource="@drawable/ic_stat_notify" />
+
         <!-- flutter_local_notifications: receivers for scheduled + boot-persisted alarms -->
         <receiver
             android:exported="false"
